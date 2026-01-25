@@ -3,14 +3,14 @@
 # Submitter Info (from your Bible: ORN record prefix/Header)
 SUBMITTER_INFO = {
     "name": "RED COLA",
-    "id": "000000009",  # Matches your ORN/HDR structure
+    "id": "000000009",
     "standard_version": "02.10"
 }
 
 # Mapping US Original Publishers to Agreement Numbers and IPIs
-# Logic: If CSV 'Original Publisher' matches Key, use these values
+# Logic: These keys now match the 'PUBLISHER 1: Name' column in your CSV
 PUBLISHER_MAPPING = {
-    "Pashalina Publishing Company": {"agreement": "4316161", "ipi": "00498578867"},
+    "Pashalina Publishing": {"agreement": "4316161", "ipi": "00498578867"},
     "Lukacino Publishing": {"agreement": "3845006", "ipi": "01254514077"},
     "Redcola Publishing": {"agreement": "4165777", "ipi": "00420164014"},
     "Snoople Songs": {"agreement": "13990221", "ipi": "01079343442"},
