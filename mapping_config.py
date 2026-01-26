@@ -1,16 +1,15 @@
 # mapping_config.py
 
-# Submitter Info (from your Bible: ORN record prefix/Header)
 SUBMITTER_INFO = {
     "name": "RED COLA",
-    "id": "000000009",
+    "id": "000000009", 
     "standard_version": "02.10"
 }
 
-# Mapping US Original Publishers to Agreement Numbers and IPIs
-# Logic: These keys now match the 'PUBLISHER 1: Name' column in your CSV
+# KEY CHANGE: Keys must match 'PUBLISHER 1: Name' in your CSV exactly.
 PUBLISHER_MAPPING = {
     "Pashalina Publishing": {"agreement": "4316161", "ipi": "00498578867"},
+    "Pashalina Publishing Company": {"agreement": "4316161", "ipi": "00498578867"},
     "Lukacino Publishing": {"agreement": "3845006", "ipi": "01254514077"},
     "Redcola Publishing": {"agreement": "4165777", "ipi": "00420164014"},
     "Snoople Songs": {"agreement": "13990221", "ipi": "01079343442"},
@@ -26,7 +25,6 @@ PUBLISHER_MAPPING = {
     "Mc Trouble Music": {"agreement": "13996234", "ipi": "00000000000"}
 }
 
-# Lumina UK Identity (The Sub-Publisher)
 SUB_PUB = {
     "name": "LUMINA PUBLISHING UK",
     "ipi": "01254514077",
