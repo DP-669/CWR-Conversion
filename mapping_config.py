@@ -7,7 +7,6 @@ PUBLISHER_MAPPING = {
     "TARMAC 1331 PUBLISHING": {"agreement": "6781310", "ipi": "00356296239", "internal_id": "000000001"},
     "PASHALINA PUBLISHING": {"agreement": "4316161", "ipi": "00498578867", "internal_id": "000000006"},
     "MANNY G MUSIC": {"agreement": "13997451", "ipi": "00515125979", "internal_id": "000000013"}
-    # Note: If Pashalina in CSV has spaces, match it here exactly or use .strip() in code.
 }
 
 WRITER_ID_MAP = {
