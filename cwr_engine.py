@@ -93,10 +93,11 @@ class CWREngine:
             lines.append(f"PWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('000000000', 9)}{self.pad(w_op, 45)}                                       {self.pad(agree, 14)}       {self.pad(w_id, 9, 'right', '0')}01")
             rec_seq += 1
 
+        # 2. REC Records (Grid Injection for extreme accuracy)
         isrc = self.pad(row.get('CODE: ISRC', ''), 12)
         album_code = self.pad(row.get('ALBUM: Code', ''), 15)
         
-        # 2. REC Records (Injection based on indices)
+        # REC 01
         rec1 = list(self.pad("", 507))
         rec1[0:3] = list("REC")
         rec1[3:11] = list(tid)
@@ -106,10 +107,11 @@ class CWREngine:
         rec1[249:249+len(isrc)] = list(isrc)
         rec1[263:265] = list("CD")
         rec1[446:454] = list("RED COLA")
-        rec1[506] = list("Y")
+        rec1[506] = "Y"  # String only
         lines.append("".join(rec1))
         rec_seq += 1
 
+        # REC 02
         rec2 = list(self.pad("", 507))
         rec2[0:3] = list("REC")
         rec2[3:11] = list(tid)
@@ -117,8 +119,9 @@ class CWREngine:
         rec2[87:93] = list("000000")
         rec2[249:249+len(isrc)] = list(isrc)
         rec2[263:265] = list("DW")
-        rec2[266:266+len(title[:60])] = list(title[:60])
-        rec2[506] = list("Y")
+        title_cut = title[:60]
+        rec2[266:266+len(title_cut)] = list(title_cut)
+        rec2[506] = "Y"  # String only
         lines.append("".join(rec2))
         rec_seq += 1
         
