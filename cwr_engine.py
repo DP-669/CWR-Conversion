@@ -37,9 +37,9 @@ class CWREngine:
         lines = []
         rec_seq = 0
         
-        # 1. REV Record (Precisely mapped indices 81, 95, 126)
+        # 1. REV Record
         title = row.get('TRACK: Title', 'UNTITLED')
-        song_code = self.pad(row.get('CODE: Song Code', ''), 7, 'right', '0')
+        song_code = self.pad(row.get('CODE: Song Code', row.get('Track Code', '')), 7, 'right', '0')
         iswc = self.pad(row.get('CODE: ISWC', ''), 11)
         duration = self.pad(row.get('TRACK: Duration', '0'), 6, 'right', '0')
         
@@ -90,19 +90,21 @@ class CWREngine:
             rec_seq += 1
             lines.append(f"SWT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(w_id, 9)}{w_pr}0000000000I2136 001")
             rec_seq += 1
-            lines.append(f"PWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('000000000', 9)}{self.pad(w_op, 45)}                                       {self.pad(agree, 14)}       {self.pad(w_id, 9, 'right', '0')}01")
+            # Composite Link Logic: WriterID + WriterIndex (i)
+            writer_link = self.pad(f"{w_id}{i:02d}", 11, 'right', '0')
+            lines.append(f"PWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('000000000', 9)}{self.pad(w_op, 45)}                                       {self.pad(agree, 14)}       {writer_link}")
             rec_seq += 1
 
+        # 2. REC Records
         isrc = self.pad(row.get('CODE: ISRC', ''), 12)
         album_code = self.pad(row.get('ALBUM: Code', ''), 15)
-        
-        # 2. REC Records (Injection based on indices 87, 218, 249, 506)
         rec1 = list(self.pad("", 507))
         rec1[0:3] = list("REC")
         rec1[3:11] = list(tid)
         rec1[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
         rec1[19:27] = list("00000000")
         rec1[87:93] = list(duration)
+        rec1[90:97] = list(song_code)
         rec1[218:218+len(album_code)] = list(album_code)
         rec1[249:249+len(isrc)] = list(isrc)
         rec1[263:265] = list("CD")
@@ -118,16 +120,15 @@ class CWREngine:
         rec2[87:93] = list("000000")
         rec2[249:249+len(isrc)] = list(isrc)
         rec2[263:265] = list("DW")
-        title_cut = row.get('TRACK: Title', 'UNTITLED').upper()[:60]
+        title_cut = str(row.get('TRACK: Title', 'UNTITLED')).upper()[:60]
         rec2[266:266+len(title_cut)] = list(title_cut)
         rec2[506] = "Y"
         lines.append("".join(rec2))
         rec_seq += 1
         
-        # 3. ORN Record (Indices 19, 22, 82, 97, 101)
+        # 3. ORN Record
         album_title = self.pad(row.get('ALBUM: Title', ''), 45)
         track_num = self.pad(row.get('TRACK: Number', '1'), 4, 'right', '0')
-        
         orn = list(self.pad("", 109))
         orn[0:3] = list("ORN")
         orn[3:11] = list(tid)
@@ -136,7 +137,7 @@ class CWREngine:
         orn[22:67] = list(album_title)
         orn[82:82+len(album_code)] = list(album_code)
         orn[97:101] = list(track_num)
-        orn[101:101+8] = list("RED COLA")
+        orn[101:109] = list("RED COLA")
         lines.append("".join(orn))
 
         self.record_count += len(lines)
