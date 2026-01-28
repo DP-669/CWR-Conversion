@@ -6,7 +6,7 @@ class CWREngine:
         self.trans_count = 0 
         self.record_count = 0
         self.group_count = 0
-        self.auto_song_code = 1 # Automatic "Set and Forget" counter
+        self.auto_song_code = 1 
 
     def pad(self, text, length, align='left', fill=' '):
         val = str(text if text is not None and str(text).lower() != 'nan' else "").strip().upper()
@@ -38,7 +38,7 @@ class CWREngine:
         lines = []
         rec_seq = 0
         
-        # Auto-sequence the Song Code (matches UK partner logic)
+        # Auto-sequence Song Code
         song_code = self.pad(self.auto_song_code, 7, 'right', '0')
         self.auto_song_code += 1
 
@@ -46,7 +46,7 @@ class CWREngine:
         iswc = self.pad(row.get('CODE: ISWC', ''), 11)
         duration = self.pad(row.get('TRACK: Duration', '0'), 6, 'right', '0')
         
-        # REV Grid Injection
+        # 1. REV Record
         rev = list(self.pad("", 260))
         rev[0:3] = list("REV")
         rev[3:11] = list(tid)
@@ -65,24 +65,35 @@ class CWREngine:
         rec_seq += 1
 
         pub_links = {}
+        # Multi-Publisher loop
         for i in range(1, 4):
             op_name = str(row.get(f'PUBLISHER {i}: Name', '')).strip().upper()
             if not op_name or op_name == 'NAN': continue
+            
             p_data = PUBLISHER_MAPPING.get(op_name, {"agreement": "0000000", "ipi": "00000000000", "internal_id": "000000000"})
             pub_links[op_name] = p_data
             pr = self.format_share(row.get(f'PUBLISHER {i}: Owner Performance Share %', '0'))
             mr = self.format_share(row.get(f'PUBLISHER {i}: Owner Mechanical Share %', '0'))
 
-            lines.append(f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(p_data['internal_id'], 9)}{self.pad(op_name, 45)} E          {self.pad(p_data['ipi'], 11, 'right', '0')}              021{pr}021{mr}   {mr} N                            {self.pad(p_data['agreement'], 14)}PG")
+            # SPU - Original Pub (Alignment Fix)
+            spu1 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(p_data['internal_id'], 9)}{self.pad(op_name, 45)} E          {self.pad(p_data['ipi'], 11, 'right', '0')}              021{pr}021{mr}   {mr} N                            {self.pad(p_data['agreement'], 14)}PG"
+            lines.append(spu1)
             rec_seq += 1
-            lines.append(f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}{self.pad(SUB_PUB['name'], 45)} SE         {self.pad(SUB_PUB['ipi'], 11, 'right', '0')}              052000000330000003300000 N                            {self.pad(p_data['agreement'], 14)}PG")
+            
+            # SPU - Lumina
+            spu2 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}{self.pad(SUB_PUB['name'], 45)} SE         {self.pad(SUB_PUB['ipi'], 11, 'right', '0')}              052000000{mr}00000{mr} N                            {self.pad(p_data['agreement'], 14)}PG"
+            lines.append(spu2)
             rec_seq += 1
+            
+            # SPT
             lines.append(f"SPT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}      {pr}{mr}{mr}I0826 001")
             rec_seq += 1
 
+        # Multi-Writer loop
         for i in range(1, 10):
             w_last = str(row.get(f'WRITER {i}: Last Name', '')).strip().upper()
             if not w_last or w_last == 'NAN': continue
+            
             w_id = WRITER_ID_MAP.get(w_last, f"00000000{i}")
             w_ipi = self.pad(row.get(f'WRITER {i}: IPI', ''), 11, 'right', '0')
             w_soc = SOCIETY_MAP.get(row.get(f'WRITER {i}: Society', ''), '021')
@@ -90,7 +101,7 @@ class CWREngine:
             w_op = str(row.get(f'WRITER {i}: Original Publisher', '')).strip().upper()
             p_match = pub_links.get(w_op, {"agreement": "0000000", "internal_id": "000000000"})
 
-            # SWR Grid Injection
+            # SWR Grid Injection (152 chars)
             swr = list(self.pad("", 152))
             swr[0:3] = list("SWR")
             swr[3:11] = list(tid)
@@ -100,8 +111,8 @@ class CWREngine:
             swr[73:103] = list(self.pad(row.get(f'WRITER {i}: First Name', ''), 30))
             swr[104] = "C"
             swr[115:126] = list(w_ipi)
-            swr[126:135] = list(f"0{w_soc}{w_pr}")
-            swr[135:151] = list("0990000009900000")
+            swr[126:134] = list(f"{w_soc}{w_pr}")
+            swr[134:151] = list("0990000009900000")
             swr[151] = "N"
             lines.append("".join(swr))
             rec_seq += 1
@@ -109,21 +120,21 @@ class CWREngine:
             lines.append(f"SWT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(w_id, 9)}{w_pr}0000000000I2136 001")
             rec_seq += 1
 
-            # PWR Grid Injection
+            # PWR Record (112 chars)
             pwr = list(self.pad("", 112))
             pwr[0:3] = list("PWR")
             pwr[3:11] = list(tid)
             pwr[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
-            pwr[19:28] = list(p_match['internal_id']) # Bible match
+            pwr[19:28] = list(p_match.get('internal_id', '000000000'))
             pwr[28:73] = list(self.pad(w_op, 45))
-            pwr[87:101] = list(self.pad(p_match['agreement'], 14))
+            pwr[87:101] = list(self.pad(p_match.get('agreement', '0000000'), 14))
             pwr[101:112] = list(self.pad(f"{w_id}{i:02d}", 11, 'right', '0'))
             lines.append("".join(pwr))
             rec_seq += 1
 
         isrc = self.pad(row.get('CODE: ISRC', ''), 12)
         album_code = self.pad(row.get('ALBUM: Code', ''), 15)
-        # REC Grid Injection
+        # 2. REC Records
         rec1 = list(self.pad("", 507))
         rec1[0:3] = list("REC")
         rec1[3:11] = list(tid)
@@ -152,15 +163,17 @@ class CWREngine:
         lines.append("".join(rec2))
         rec_seq += 1
         
-        # ORN Grid Injection
+        # 3. ORN Record
+        album_title = self.pad(row.get('ALBUM: Title', ''), 45)
+        track_num = self.pad(row.get('TRACK: Number', '1'), 4, 'right', '0')
         orn = list(self.pad("", 109))
         orn[0:3] = list("ORN")
         orn[3:11] = list(tid)
         orn[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
         orn[19:22] = list("LIB")
-        orn[22:67] = list(self.pad(row.get('ALBUM: Title', ''), 45))
+        orn[22:67] = list(self.pad(album_title, 45))
         orn[82:82+len(album_code)] = list(album_code)
-        orn[97:101] = list(self.pad(row.get('TRACK: Number', '1'), 4, 'right', '0'))
+        orn[97:101] = list(track_num)
         orn[101:109] = list("RED COLA")
         lines.append("".join(orn))
 
