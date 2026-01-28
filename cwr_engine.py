@@ -21,7 +21,6 @@ class CWREngine:
         except: return '00000'
 
     def inject(self, grid, start, text):
-        """Surgically inserts text into the character grid."""
         t_list = list(str(text))
         grid[start : start + len(t_list)] = t_list
 
@@ -44,12 +43,11 @@ class CWREngine:
         
         song_code = self.pad(self.auto_song_code, 7, 'right', '0')
         self.auto_song_code += 1
-
         title = row.get('TRACK: Title', 'UNTITLED').upper()
         iswc = self.pad(row.get('CODE: ISWC', ''), 11)
         duration = self.pad(row.get('TRACK: Duration', '0'), 6, 'right', '0')
         
-        # 1. REV Record (260 chars)
+        # 1. REV Record
         rev = [' '] * 260
         self.inject(rev, 0, "REV")
         self.inject(rev, 3, tid)
@@ -63,29 +61,28 @@ class CWREngine:
         self.inject(rev, 135, "Y")
         self.inject(rev, 142, "ORI")
         self.inject(rev, 197, "00000000000")
-        self.inject(rev, 259, "Y")
+        rev[259] = "Y"
         lines.append("".join(rev))
         rec_seq += 1
 
         pub_links = {}
+        # Multi-Publisher loop
         for i in range(1, 4):
             op_name = str(row.get(f'PUBLISHER {i}: Name', '')).strip().upper()
             if not op_name or op_name == 'NAN': continue
-            p_data = PUBLISHER_MAPPING.get(op_name, {"agreement": "0000000", "ipi": "00000000000", "internal_id": "000000000"})
+            p_data = PUBLISHER_MAPPING.get(op_name, {"agreement": "0000000", "internal_id": "000000000"})
             pub_links[op_name] = p_data
-            pr = self.format_share(row.get(f'PUBLISHER {i}: Owner Performance Share %', '0'))
-            mr = self.format_share(row.get(f'PUBLISHER {i}: Owner Mechanical Share %', '0'))
+            pr, mr = self.format_share(row.get(f'PUBLISHER {i}: Owner Performance Share %', '0')), self.format_share(row.get(f'PUBLISHER {i}: Owner Mechanical Share %', '0'))
 
-            spu1 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(p_data['internal_id'], 9)}{self.pad(op_name, 45)} E          {self.pad(p_data['ipi'], 11, 'right', '0')}              021{pr}021{mr}   {mr} N                            {self.pad(p_data['agreement'], 14)}PG"
-            lines.append(spu1)
+            lines.append(f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(p_data['internal_id'], 9)}{self.pad(op_name, 45)} E          {self.pad(row.get(f'PUBLISHER {i}: IPI', ''), 11, 'right', '0')}              021{pr}021{mr}   {mr} N                            {self.pad(p_data['agreement'], 14)}PG")
             rec_seq += 1
-            spu2 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}{self.pad(SUB_PUB['name'], 45)} SE         {self.pad(SUB_PUB['ipi'], 11, 'right', '0')}              052000000{mr}00000{mr} N                            {self.pad(p_data['agreement'], 14)}PG"
-            lines.append(spu2)
+            lines.append(f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}{self.pad(SUB_PUB['name'], 45)} SE         {self.pad(SUB_PUB['ipi'], 11, 'right', '0')}              052000000{mr}00000{mr} N                            {self.pad(p_data['agreement'], 14)}PG")
             rec_seq += 1
             lines.append(f"SPT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}      {pr}{mr}{mr}I0826 001")
             rec_seq += 1
 
-        for i in range(1, 4):
+        # Multi-Writer loop
+        for i in range(1, 10):
             w_last = str(row.get(f'WRITER {i}: Last Name', '')).strip().upper()
             if not w_last or w_last == 'NAN': continue
             w_id = WRITER_ID_MAP.get(w_last, f"00000000{i}")
@@ -95,7 +92,6 @@ class CWREngine:
             w_op = str(row.get(f'WRITER {i}: Original Publisher', '')).strip().upper()
             p_match = pub_links.get(w_op, {"agreement": "0000000", "internal_id": "000000000"})
 
-            # 2. SWR Record (152 chars) - FIXES CRASH
             swr = [' '] * 152
             self.inject(swr, 0, "SWR")
             self.inject(swr, 3, tid)
@@ -103,11 +99,11 @@ class CWREngine:
             self.inject(swr, 19, w_id)
             self.inject(swr, 28, self.pad(w_last, 45))
             self.inject(swr, 73, self.pad(row.get(f'WRITER {i}: First Name', ''), 30))
-            self.inject(swr, 104, "C")
+            swr[104] = "C"
             self.inject(swr, 115, w_ipi)
             self.inject(swr, 126, f"{w_soc}{w_pr}")
             self.inject(swr, 134, "0990000009900000")
-            self.inject(swr, 151, "N")
+            swr[151] = "N"
             lines.append("".join(swr))
             rec_seq += 1
 
@@ -127,25 +123,24 @@ class CWREngine:
 
         isrc = self.pad(row.get('CODE: ISRC', ''), 12)
         album_code = self.pad(row.get('ALBUM: Code', ''), 15)
-        # 3. REC Records (507 chars)
+        # 2. REC Records
         for r_type in ["CD", "DW"]:
             rec = [' '] * 507
             self.inject(rec, 0, "REC")
             self.inject(rec, 3, tid)
             self.inject(rec, 11, self.pad(rec_seq, 8, 'right', '0'))
-            self.inject(rec, 19, "00000000")
+            if r_type == "CD": self.inject(rec, 19, "00000000")
             self.inject(rec, 87, duration if r_type == "CD" else "000000")
-            self.inject(rec, 90, song_code)
-            self.inject(rec, 218, album_code)
+            self.inject(rec, 218, album_code if r_type == "CD" else "")
             self.inject(rec, 249, isrc)
             self.inject(rec, 263, r_type)
             if r_type == "DW": self.inject(rec, 266, title[:60])
             if r_type == "CD": self.inject(rec, 446, "RED COLA")
-            self.inject(rec, 506, "Y")
+            rec[506] = "Y"
             lines.append("".join(rec))
             rec_seq += 1
         
-        # 4. ORN Record (109 chars)
+        # 3. ORN Record
         orn = [' '] * 109
         self.inject(orn, 0, "ORN")
         self.inject(orn, 3, tid)
