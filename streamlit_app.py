@@ -3,8 +3,9 @@ import streamlit as st
 import pandas as pd
 from cwr_engine import CWREngine
 
-st.set_page_config(page_title="redCola CWR Factory", layout="wide")
-st.title("🎵 redCola CWR Converter")
+st.set_page_config(page_title="redCola Production CWR", layout="wide")
+st.title("🎵 redCola Production CWR Factory")
+st.markdown("Upload your Harvest Media CSV. The system handles all sequencing automatically.")
 
 file = st.file_uploader("Upload Source CSV", type="csv")
 
@@ -13,18 +14,15 @@ if file:
     engine = CWREngine()
     output = []
     
-    # 1. Start Envelope
     output.append(engine.make_hdr())
     output.append(engine.make_grh())
     
-    # 2. Process Works
     for _, row in df.iterrows():
-        # Using the new function name that handles complex splits
         output.append(engine.generate_work_block(row))
     
-    # 3. Close Envelope
     output.append(engine.make_trl())
     
     final_text = "\n".join(output)
-    st.download_button("Download Production CWR", final_text, "bulk_registration.txt")
-    st.text_area("Live Review", final_text, height=400)
+    st.download_button("Download Finished CWR", final_text, "registration.txt")
+    st.text_area("Live Review", final_text, height=300)
+    st.success(f"Processed {len(df)} tracks successfully.")
