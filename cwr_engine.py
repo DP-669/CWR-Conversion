@@ -37,8 +37,8 @@ class CWREngine:
         lines = []
         rec_seq = 0
         
-        # 1. REV Record
-        title = self.pad(row.get('TRACK: Title', 'UNTITLED'), 60)
+        # 1. REV Record (Precisely mapped indices 81, 95, 126)
+        title = row.get('TRACK: Title', 'UNTITLED')
         song_code = self.pad(row.get('CODE: Song Code', ''), 7, 'right', '0')
         iswc = self.pad(row.get('CODE: ISWC', ''), 11)
         duration = self.pad(row.get('TRACK: Duration', '0'), 6, 'right', '0')
@@ -47,7 +47,7 @@ class CWREngine:
         rev[0:3] = list("REV")
         rev[3:11] = list(tid)
         rev[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
-        rev[19:79] = list(title)
+        rev[19:19+len(title[:60])] = list(title[:60].upper())
         rev[81:88] = list(song_code)
         rev[95:106] = list(iswc)
         rev[106:114] = list("00000000")
@@ -93,25 +93,24 @@ class CWREngine:
             lines.append(f"PWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('000000000', 9)}{self.pad(w_op, 45)}                                       {self.pad(agree, 14)}       {self.pad(w_id, 9, 'right', '0')}01")
             rec_seq += 1
 
-        # 2. REC Records (Grid Injection for extreme accuracy)
         isrc = self.pad(row.get('CODE: ISRC', ''), 12)
         album_code = self.pad(row.get('ALBUM: Code', ''), 15)
         
-        # REC 01
+        # 2. REC Records (Injection based on indices 87, 218, 249, 506)
         rec1 = list(self.pad("", 507))
         rec1[0:3] = list("REC")
         rec1[3:11] = list(tid)
         rec1[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
+        rec1[19:27] = list("00000000")
         rec1[87:93] = list(duration)
         rec1[218:218+len(album_code)] = list(album_code)
         rec1[249:249+len(isrc)] = list(isrc)
         rec1[263:265] = list("CD")
         rec1[446:454] = list("RED COLA")
-        rec1[506] = "Y"  # String only
+        rec1[506] = "Y"
         lines.append("".join(rec1))
         rec_seq += 1
 
-        # REC 02
         rec2 = list(self.pad("", 507))
         rec2[0:3] = list("REC")
         rec2[3:11] = list(tid)
@@ -119,17 +118,26 @@ class CWREngine:
         rec2[87:93] = list("000000")
         rec2[249:249+len(isrc)] = list(isrc)
         rec2[263:265] = list("DW")
-        title_cut = title[:60]
+        title_cut = row.get('TRACK: Title', 'UNTITLED').upper()[:60]
         rec2[266:266+len(title_cut)] = list(title_cut)
-        rec2[506] = "Y"  # String only
+        rec2[506] = "Y"
         lines.append("".join(rec2))
         rec_seq += 1
         
-        # 3. ORN Record
+        # 3. ORN Record (Indices 19, 22, 82, 97, 101)
         album_title = self.pad(row.get('ALBUM: Title', ''), 45)
         track_num = self.pad(row.get('TRACK: Number', '1'), 4, 'right', '0')
-        orn = f"ORN{tid}{self.pad(rec_seq, 8, 'right', '0')}LIB{album_title}{self.pad(album_code, 15)}{track_num}RED COLA"
-        lines.append(orn)
+        
+        orn = list(self.pad("", 109))
+        orn[0:3] = list("ORN")
+        orn[3:11] = list(tid)
+        orn[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
+        orn[19:22] = list("LIB")
+        orn[22:67] = list(album_title)
+        orn[82:82+len(album_code)] = list(album_code)
+        orn[97:101] = list(track_num)
+        orn[101:101+8] = list("RED COLA")
+        lines.append("".join(orn))
 
         self.record_count += len(lines)
         return "\n".join(lines)
