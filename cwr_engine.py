@@ -10,56 +10,63 @@ PUBLISHER_DB = {
 }
 
 def pad(val, length, is_num=False):
-    """Strict fixed-width formatting."""
+    """Strict fixed-width formatting for CWR."""
     if pd.isna(val): val = ""
     v = str(val).strip().upper()
     return v.zfill(length) if is_num else v.ljust(length)[:length]
 
 def normalize_columns(df):
-    """Smart-maps user columns to standard names."""
-    # Map common variations to the required standard keys
-    mapping = {
-        'Title': ['Title', 'Work Title', 'Track Title', 'Song Name', 'Track Name', 'Work Name'],
-        'Song_Number': ['Song_Number', 'Song Number', 'Work ID', 'Track ID', 'Number', 'ID'],
-        'Publisher': ['Publisher', 'Original Publisher', 'Publisher Name', 'Copyright', 'Label'],
-        'ISRC': ['ISRC', 'ISRC Code'],
-        'Library_Album': ['Library_Album', 'Library', 'Album', 'Source', 'CD Title'],
-        'CD_Identifier': ['CD_Identifier', 'CD ID', 'Catalog Number', 'Cat No', 'Catalogue Number']
+    """
+    Smart-Mapper: Auto-detects column names regardless of 
+    spacing, capitalization, or common variations.
+    """
+    # 1. Clean existing headers (strip whitespace, lowercase)
+    df.columns = [str(c).strip() for c in df.columns]
+    
+    # 2. Define known aliases for required fields
+    mapping_targets = {
+        'Title': ['title', 'work title', 'work_title', 'track title', 'track name', 'song name', 'song title'],
+        'Song_Number': ['song_number', 'song number', 'song no', 'work id', 'work_id', 'track id', 'number', 'id'],
+        'Publisher': ['publisher', 'publisher name', 'pub', 'original publisher', 'copyright', 'label'],
+        'ISRC': ['isrc', 'isrc code'],
+        'Library_Album': ['library_album', 'library', 'album', 'source', 'cd title', 'from album'],
+        'CD_Identifier': ['cd_identifier', 'cd id', 'catalog number', 'cat no', 'catalogue number']
     }
     
-    # Create a clean version of the dataframe
-    clean_df = df.copy()
-    found_cols = []
+    # 3. Rename columns if matches are found
+    for standard, aliases in mapping_targets.items():
+        # Check if we already have the standard name
+        if standard in df.columns:
+            continue
+            
+        # Look for aliases (case-insensitive)
+        for col in df.columns:
+            if col.lower() in aliases:
+                df.rename(columns={col: standard}, inplace=True)
+                break
     
-    for standard, variants in mapping.items():
-        # Find the first matching column in the user's file
-        match = next((col for col in df.columns if col in variants), None)
-        if match:
-            clean_df.rename(columns={match: standard}, inplace=True)
-            found_cols.append(standard)
-    
-    return clean_df
+    return df
 
 def generate_cwr_content(df):
-    # 1. Normalize Column Names first
+    # PRE-PROCESS: Normalize columns to ensure we find the data
     df = normalize_columns(df)
     
     lines = []
     now_d, now_t = datetime.now().strftime("%Y%m%d"), datetime.now().strftime("%H%M%S")
     
-    # 2. Header
+    # HEADER
     lines.append(f"HDR012545140LUMINA PUBLISHING UK         01.10{now_d}{now_t}{now_d}               2.2001BACKBEAT")
     lines.append("GRHREV0000102.200000000001")
 
-    # 3. Transaction Loop
+    # TRANSACTIONS
     for i, row in df.iterrows():
         t_idx = i + 1
         
-        # Safe extraction with defaults
+        # Publisher Lookup
         pub_raw = str(row.get('Publisher', 'TARMAC')).upper()
         p = next((v for k, v in PUBLISHER_DB.items() if k in pub_raw), PUBLISHER_DB["TARMAC"])
         
-        # Use actual column data or fallback to defaults if strictly necessary
+        # Data Extraction (Now robust due to normalization)
         work_id = pad(row.get('Song_Number', t_idx), 14, True)
         title = pad(row.get('Title', 'UNKNOWN TITLE'), 60)
         isrc = pad(row.get('ISRC', ''), 12)
@@ -75,7 +82,7 @@ def generate_cwr_content(df):
         # SPT (Territory)
         lines.append(f"SPT{t_idx:08d}00000002016500330003300I0826 001")
 
-        # PWR (Publisher for Recording - Required for Library)
+        # PWR (Publisher for Recording)
         lines.append(f"PWR{t_idx:08d}0000000301000000000{pad(p['name'], 45)}{pad(p['agreement'], 14)}00000000000")
 
         # REC (Recording)
@@ -84,7 +91,7 @@ def generate_cwr_content(df):
         # ORN (Origin)
         lines.append(f"ORN{t_idx:08d}00000005LIB{library}{cd_id}0254RED COLA")
 
-    # 4. Trailers
+    # TRAILERS
     lines.append(f"GRT00001{len(df):08d}{len(lines)+1:08d}")
     lines.append(f"TRL00001{len(df):08d}{len(lines)+1:08d}")
 
