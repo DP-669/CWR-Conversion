@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from cwr_engine import generate_cwr_content
+from cwr_engine import generate_cwr_content, normalize_columns
 
 st.set_page_config(page_title="Sync-Curator CWR Tool", page_icon="🎵")
 st.title("Lumina CWR Generator")
@@ -10,12 +10,23 @@ uploaded_file = st.file_uploader("Upload Metadata CSV", type="csv")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.success(f"File loaded: {len(df)} tracks detected.")
     
-    with st.expander("Preview & Column Check"):
-        st.write(df.head())
-        # Show which columns were detected
-        st.info("The engine will auto-map columns like 'Work Title' to 'Title'.")
+    # Run the smart-mapper immediately to show user what we found
+    mapped_df = normalize_columns(df.copy())
+    
+    st.success(f"File loaded: {len(df)} tracks.")
+    
+    with st.expander("✅ Verify Column Mapping"):
+        st.write("We detected these columns from your file:")
+        st.dataframe(mapped_df.head(3))
+        
+        # Safety Check
+        required = ['Title', 'Song_Number', 'Publisher']
+        missing = [col for col in required if col not in mapped_df.columns]
+        if missing:
+            st.error(f"⚠️ Warning: We could not find columns for: {', '.join(missing)}. Please check your CSV headers.")
+        else:
+            st.success("All required columns mapped successfully!")
 
     if st.button("Generate Validated CWR"):
         try:
@@ -28,6 +39,5 @@ if uploaded_file:
                 file_name=filename,
                 mime="text/plain"
             )
-            st.success("Generation Complete.")
         except Exception as e:
             st.error(f"Error: {e}")
