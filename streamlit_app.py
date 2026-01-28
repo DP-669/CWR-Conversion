@@ -1,61 +1,44 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from cwr_engine import generate_cwr_content, normalize_columns
+from cwr_engine import generate_cwr_content
 
 st.set_page_config(page_title="Sync-Curator CWR Tool", page_icon="🎵")
-st.title("Lumina CWR Generator")
+st.title("Lumina CWR Generator (Restored)")
 
 uploaded_file = st.file_uploader("Upload Metadata CSV", type="csv")
 
 if uploaded_file:
-    # --- SMART LOADER: Detect Header Row ---
-    # 1. Read the file without assuming a header
+    # --- RESET: SIMPLIFIED HEADER DETECTION ---
+    # We read the raw file to find where the actual data starts.
+    # This solves the issue of "Metadata Rows" causing UNKNOWN TITLE.
+    
     df_raw = pd.read_csv(uploaded_file, header=None)
+    header_row_index = 0
     
-    # 2. Scan first 10 rows to find the real header (containing 'Title' and 'Publisher')
-    header_idx = 0
-    found_header = False
-    
-    for i, row in df_raw.head(10).iterrows():
-        # Convert row to lowercase string for searching
+    # Simple Scan: Find the row that contains "Title" or "Song_Number"
+    for i, row in df_raw.head(20).iterrows():
         row_text = row.astype(str).str.lower().tolist()
-        
-        # Heuristic: If row has 'title' AND 'publisher' (or variants), it's the header
-        has_title = any(x in str(row_text) for x in ['title', 'work title', 'track name'])
-        has_pub = any(x in str(row_text) for x in ['publisher', 'copyright', 'label'])
-        
-        if has_title: # 'Publisher' check is optional as it might be missing in some exports
-            header_idx = i
-            found_header = True
+        if any('title' in x for x in row_text) or any('song' in x for x in row_text):
+            header_row_index = i
             break
+            
+    # Reload with correct header
+    uploaded_file.seek(0)
+    df = pd.read_csv(uploaded_file, header=header_row_index)
     
-    # 3. Reload the dataframe using the detected header row
-    uploaded_file.seek(0) # Reset file pointer
-    df = pd.read_csv(uploaded_file, header=header_idx)
+    st.success(f"File loaded. Header detected at Row {header_row_index + 1}.")
     
-    # --- END SMART LOADER ---
-
-    # Normalize columns immediately to verify mapping
-    df = normalize_columns(df)
-    
-    st.success(f"File loaded successfully! (Header detected at Row {header_idx+1})")
-    
-    with st.expander("✅ Verify Data Preview"):
+    with st.expander("Preview Data (Verify Columns)"):
         st.write(df.head())
-        
-        # Check for Critical Columns
-        required = ['Title', 'Song_Number']
-        missing = [col for col in required if col not in df.columns]
-        
-        if missing:
-            st.error(f"⚠️ CRITICAL: Could not find columns: {', '.join(missing)}. output will contain 'UNKNOWN TITLE'.")
-        else:
-            st.info("Columns mapped correctly. Ready to generate.")
+        # Visual Check for the user
+        if 'Title' not in df.columns and 'Work Title' not in df.columns:
+            st.error("⚠️ Warning: 'Title' column not found. Output may show 'UNKNOWN TITLE'. Check your CSV.")
 
     if st.button("Generate Validated CWR"):
         try:
             cwr_output = generate_cwr_content(df)
+            
             filename = f"LUMINA_ICE_{datetime.now().strftime('%Y%m%d')}.V21"
             
             st.download_button(
@@ -64,5 +47,7 @@ if uploaded_file:
                 file_name=filename,
                 mime="text/plain"
             )
+            st.success("Generation Complete.")
+            
         except Exception as e:
             st.error(f"Error: {e}")
