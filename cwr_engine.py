@@ -38,7 +38,6 @@ class CWREngine:
         lines = []
         rec_seq = 0
         
-        # Auto-sequence Song Code
         song_code = self.pad(self.auto_song_code, 7, 'right', '0')
         self.auto_song_code += 1
 
@@ -65,35 +64,24 @@ class CWREngine:
         rec_seq += 1
 
         pub_links = {}
-        # Multi-Publisher loop
         for i in range(1, 4):
             op_name = str(row.get(f'PUBLISHER {i}: Name', '')).strip().upper()
             if not op_name or op_name == 'NAN': continue
-            
             p_data = PUBLISHER_MAPPING.get(op_name, {"agreement": "0000000", "ipi": "00000000000", "internal_id": "000000000"})
             pub_links[op_name] = p_data
             pr = self.format_share(row.get(f'PUBLISHER {i}: Owner Performance Share %', '0'))
             mr = self.format_share(row.get(f'PUBLISHER {i}: Owner Mechanical Share %', '0'))
 
-            # SPU - Original Pub (Alignment Fix)
-            spu1 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(p_data['internal_id'], 9)}{self.pad(op_name, 45)} E          {self.pad(p_data['ipi'], 11, 'right', '0')}              021{pr}021{mr}   {mr} N                            {self.pad(p_data['agreement'], 14)}PG"
-            lines.append(spu1)
+            lines.append(f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(p_data['internal_id'], 9)}{self.pad(op_name, 45)} E          {self.pad(p_data['ipi'], 11, 'right', '0')}              021{pr}021{mr}   {mr} N                            {self.pad(p_data['agreement'], 14)}PG")
             rec_seq += 1
-            
-            # SPU - Lumina
-            spu2 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}{self.pad(SUB_PUB['name'], 45)} SE         {self.pad(SUB_PUB['ipi'], 11, 'right', '0')}              052000000{mr}00000{mr} N                            {self.pad(p_data['agreement'], 14)}PG"
-            lines.append(spu2)
+            lines.append(f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}{self.pad(SUB_PUB['name'], 45)} SE         {self.pad(SUB_PUB['ipi'], 11, 'right', '0')}              052000000{mr}00000{mr} N                            {self.pad(p_data['agreement'], 14)}PG")
             rec_seq += 1
-            
-            # SPT
             lines.append(f"SPT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}      {pr}{mr}{mr}I0826 001")
             rec_seq += 1
 
-        # Multi-Writer loop
-        for i in range(1, 10):
+        for i in range(1, 4):
             w_last = str(row.get(f'WRITER {i}: Last Name', '')).strip().upper()
             if not w_last or w_last == 'NAN': continue
-            
             w_id = WRITER_ID_MAP.get(w_last, f"00000000{i}")
             w_ipi = self.pad(row.get(f'WRITER {i}: IPI', ''), 11, 'right', '0')
             w_soc = SOCIETY_MAP.get(row.get(f'WRITER {i}: Society', ''), '021')
@@ -101,7 +89,7 @@ class CWREngine:
             w_op = str(row.get(f'WRITER {i}: Original Publisher', '')).strip().upper()
             p_match = pub_links.get(w_op, {"agreement": "0000000", "internal_id": "000000000"})
 
-            # SWR Grid Injection (152 chars)
+            # SWR Grid Size Fix (Length 152)
             swr = list(self.pad("", 152))
             swr[0:3] = list("SWR")
             swr[3:11] = list(tid)
@@ -120,7 +108,6 @@ class CWREngine:
             lines.append(f"SWT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(w_id, 9)}{w_pr}0000000000I2136 001")
             rec_seq += 1
 
-            # PWR Record (112 chars)
             pwr = list(self.pad("", 112))
             pwr[0:3] = list("PWR")
             pwr[3:11] = list(tid)
