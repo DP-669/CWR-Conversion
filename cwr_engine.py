@@ -32,17 +32,21 @@ class CWREngine:
 
     def generate_work_block(self, row):
         lines = []
-        tid = self.pad(self.trans_count * 2, 8, 'right', '0')
+        # Transaction IDs for approved files usually start at 0 and increment by 1
+        tid = self.pad(self.trans_count, 8, 'right', '0')
         self.trans_count += 1
         
-        # 1. REV Record (Starts at Index 0)
         title = self.pad(row.get('TRACK: Title', 'UNTITLED'), 60)
-        # Song Code starts at 79, ISWC at 93
-        song_code = self.pad(row.get('CODE: Song Code', ''), 14, 'right')
+        # Song Code alignment (index 81-87 per Bible)
+        song_code_raw = self.pad(row.get('CODE: Song Code', ''), 7, 'right', '0')
+        song_code_field = f"  {song_code_raw}     " # Total 14 chars starting at index 79
+        
+        # ISWC starts at index 95 (add 2 spaces after song code field)
         iswc = self.pad(row.get('CODE: ISWC', ''), 11)
         duration = self.pad(row.get('TRACK: Duration', '0'), 6, 'right', '0')
         
-        rev = f"REV{tid}{self.pad(0, 8, 'right', '0')}{title}{song_code}{iswc}0000000000            UNC{duration}Y      ORI                                                    00000000000                                                   Y"
+        # 1. Main REV Record
+        rev = f"REV{tid}{self.pad(0, 8, 'right', '0')}{title}{song_code_field}  {iswc}0000000000            UNC{duration}Y      ORI                                                    00000000000                                                   Y"
         lines.append(rev)
 
         rec_seq = 1
@@ -57,13 +61,13 @@ class CWREngine:
             pr = self.format_share(row.get(f'PUBLISHER {i}: Owner Performance Share %', '0'))
             mr = self.format_share(row.get(f'PUBLISHER {i}: Owner Mechanical Share %', '0'))
 
-            # SPU - Original Pub (Alignment Fix)
-            spu1 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(p_data['internal_id'], 9)}{self.pad(op_name, 45)}E          {self.pad(p_data['ipi'], 11, 'right', '0')}              021{pr}021{mr}   {mr} N                            {self.pad(p_data['agreement'], 14)}PG"
+            # SPU - Original Pub (Role E starts at index 76)
+            spu1 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(p_data['internal_id'], 9)}{self.pad(op_name, 45)} E          {self.pad(p_data['ipi'], 11, 'right', '0')}              021{pr}021{mr}   {mr} N                            {self.pad(p_data['agreement'], 14)}PG"
             lines.append(spu1)
             rec_seq += 1
             
-            # SPU - Lumina Sub-Pub
-            spu2 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}{self.pad(SUB_PUB['name'], 45)}SE         {self.pad(SUB_PUB['ipi'], 11, 'right', '0')}              052000000330000003300000 N                            {self.pad(p_data['agreement'], 14)}PG"
+            # SPU - Lumina Sub-Pub (Role SE starts at index 76)
+            spu2 = f"SPU{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(i, 2, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}{self.pad(SUB_PUB['name'], 45)} SE         {self.pad(SUB_PUB['ipi'], 11, 'right', '0')}              052000000330000003300000 N                            {self.pad(p_data['agreement'], 14)}PG"
             lines.append(spu2)
             rec_seq += 1
             
@@ -72,42 +76,40 @@ class CWREngine:
             rec_seq += 1
 
         # Multi-Writer loop (SWR + SWT + PWR)
-        for i in range(1, 4):
+        for i in range(1, 10):
             w_last = str(row.get(f'WRITER {i}: Last Name', '')).strip().upper()
             if not w_last or w_last == 'NAN': continue
             
-            w_id = WRITER_ID_MAP.get(w_last, "000000000")
+            w_id = WRITER_ID_MAP.get(w_last, f"00000000{i}")
             w_ipi = self.pad(row.get(f'WRITER {i}: IPI', ''), 11, 'right', '0')
             w_soc = SOCIETY_MAP.get(row.get(f'WRITER {i}: Society', ''), '021')
             w_pr = self.format_share(row.get(f'WRITER {i}: Owner Performance Share %', '0'))
             w_op = str(row.get(f'WRITER {i}: Original Publisher', '')).strip().upper()
             agree = pub_links.get(w_op, "0000000")
 
-            # SWR Alignment
-            lines.append(f"SWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(w_id, 9)}{self.pad(w_last, 45)}{self.pad(row.get(f'WRITER {i}: First Name', ''), 30)}C          {w_ipi}{w_soc}{w_pr}0990000009900000 N")
+            # SWR Role C starts at index 104
+            lines.append(f"SWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(w_id, 9)}{self.pad(w_last, 45)}{self.pad(row.get(f'WRITER {i}: First Name', ''), 30)} C          {w_ipi}{w_soc}{w_pr}0990000009900000 N")
             rec_seq += 1
-            # SWT Alignment
+            # SWT
             lines.append(f"SWT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(w_id, 9)}{w_pr}0000000000I2136 001")
             rec_seq += 1
-            # PWR Alignment
+            # PWR
             lines.append(f"PWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('000000000', 9)}{self.pad(w_op, 45)}                                       {self.pad(agree, 14)}       {self.pad(w_id, 9, 'right', '0')}01")
             rec_seq += 1
 
-        # REC & ORN (Precision alignment for indices 87, 218, 249)
         isrc = self.pad(row.get('CODE: ISRC', ''), 12)
         album_code = self.pad(row.get('ALBUM: Code', ''), 15)
         
-        # REC 01 (Duration at index 87, Album at 218, ISRC at 249)
-        rec1 = f"REC{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('0', 68)}{duration}{self.pad('', 125)}{album_code}{self.pad('', 15)}{isrc}  CD{self.pad('', 181)}RED COLA{self.pad('', 52)}Y"
+        # 4. REC Records (Duration index 87, Album 218, ISRC 249)
+        rec1 = f"REC{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('', 53)}{song_code_raw}{duration}{self.pad('', 125)}{album_code}{self.pad('', 16)}{isrc}  CD{self.pad('', 181)}RED COLA{self.pad('', 52)}Y"
         lines.append(rec1)
         rec_seq += 1
         
-        # REC 02 (Digital Work)
-        rec2 = f"REC{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('0', 68)}000000{self.pad('', 156)}{isrc}  DW {self.pad(row.get('TRACK: Title', ''), 60)}{self.pad('', 181)}Y"
+        rec2 = f"REC{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('', 60)}000000{self.pad('', 164)}{isrc}  DW {self.pad(row.get('TRACK: Title', ''), 60)}{self.pad('', 181)}Y"
         lines.append(rec2)
         rec_seq += 1
         
-        # ORN (Origin)
+        # 5. ORN Record (Final)
         orn = f"ORN{tid}{self.pad(rec_seq, 8, 'right', '0')}LIB{self.pad(row.get('ALBUM: Title', ''), 45)}{album_code}{self.pad(row.get('TRACK: Number', '1'), 4, 'right', '0')}RED COLA"
         lines.append(orn)
 
@@ -116,4 +118,4 @@ class CWREngine:
 
     def make_trl(self):
         self.record_count += 2
-        return f"GRT00001{self.pad(self.trans_count * 2, 8, 'right', '0')}{self.pad(self.record_count - 1, 8, 'right', '0')}\nTRL00001{self.pad(self.trans_count * 2, 8, 'right', '0')}{self.pad(self.record_count, 8, 'right', '0')}"
+        return f"GRT00001{self.pad(self.trans_count, 8, 'right', '0')}{self.pad(self.record_count - 1, 8, 'right', '0')}\nTRL00001{self.pad(self.trans_count, 8, 'right', '0')}{self.pad(self.record_count, 8, 'right', '0')}"
