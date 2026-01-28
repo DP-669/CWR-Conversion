@@ -1,28 +1,42 @@
-# streamlit_app.py
 import streamlit as st
 import pandas as pd
-from cwr_engine import CWREngine
+from datetime import datetime
+# This line was the error. We are now pointing to the correct file name.
+from cwr_generator import generate_cwr_content
 
-st.set_page_config(page_title="redCola Production CWR", layout="wide")
-st.title("🎵 redCola Production CWR Factory")
-st.markdown("Upload your Harvest Media CSV. The system handles all sequencing automatically.")
+st.set_page_config(page_title="Sync-Curator CWR Tool", page_icon="🎵")
 
-file = st.file_uploader("Upload Source CSV", type="csv")
+st.title("Lumina CWR Generator")
+st.markdown("### ICE-Validated V2.1 Conversion")
 
-if file:
-    df = pd.read_csv(file)
-    engine = CWREngine()
-    output = []
+uploaded_file = st.file_uploader("Upload your Metadata CSV", type="csv")
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.success(f"File loaded: {len(df)} tracks detected.")
     
-    output.append(engine.make_hdr())
-    output.append(engine.make_grh())
-    
-    for _, row in df.iterrows():
-        output.append(engine.generate_work_block(row))
-    
-    output.append(engine.make_trl())
-    
-    final_text = "\n".join(output)
-    st.download_button("Download Finished CWR", final_text, "registration.txt")
-    st.text_area("Live Review", final_text, height=300)
-    st.success(f"Processed {len(df)} tracks successfully.")
+    # Optional: Display a small preview to ensure columns are mapped
+    with st.expander("Preview Uploaded Data"):
+        st.write(df.head())
+
+    if st.button("Finalize & Generate CWR"):
+        try:
+            # Call the engine from cwr_generator.py
+            cwr_output = generate_cwr_content(df)
+            
+            # Generate filename with today's date
+            datestamp = datetime.now().strftime("%Y%m%d")
+            filename = f"LUMINA_ICE_{datestamp}.V21"
+            
+            st.download_button(
+                label="📥 Download Validated .V21 File",
+                data=cwr_output,
+                file_name=filename,
+                mime="text/plain"
+            )
+            st.balloons()
+            st.success("CWR Generation Successful. Ready for ICE portal upload.")
+            
+        except Exception as e:
+            st.error(f"Logic Error: {e}")
+            st.info("Check that your CSV has 'Title', 'Song_Number', and 'Publisher' columns.")
