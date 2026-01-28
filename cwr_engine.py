@@ -6,6 +6,7 @@ class CWREngine:
         self.trans_count = 0 
         self.record_count = 0
         self.group_count = 0
+        self.auto_song_code = 1 # Automatic "Set and Forget" counter
 
     def pad(self, text, length, align='left', fill=' '):
         val = str(text if text is not None and str(text).lower() != 'nan' else "").strip().upper()
@@ -37,12 +38,15 @@ class CWREngine:
         lines = []
         rec_seq = 0
         
-        # 1. REV Record
+        # Auto-sequence the Song Code (matches UK partner logic)
+        song_code = self.pad(self.auto_song_code, 7, 'right', '0')
+        self.auto_song_code += 1
+
         title = row.get('TRACK: Title', 'UNTITLED')
-        song_code = self.pad(row.get('CODE: Song Code', row.get('Track Code', '')), 7, 'right', '0')
         iswc = self.pad(row.get('CODE: ISWC', ''), 11)
         duration = self.pad(row.get('TRACK: Duration', '0'), 6, 'right', '0')
         
+        # REV Grid Injection
         rev = list(self.pad("", 260))
         rev[0:3] = list("REV")
         rev[3:11] = list(tid)
@@ -65,7 +69,7 @@ class CWREngine:
             op_name = str(row.get(f'PUBLISHER {i}: Name', '')).strip().upper()
             if not op_name or op_name == 'NAN': continue
             p_data = PUBLISHER_MAPPING.get(op_name, {"agreement": "0000000", "ipi": "00000000000", "internal_id": "000000000"})
-            pub_links[op_name] = p_data['agreement']
+            pub_links[op_name] = p_data
             pr = self.format_share(row.get(f'PUBLISHER {i}: Owner Performance Share %', '0'))
             mr = self.format_share(row.get(f'PUBLISHER {i}: Owner Mechanical Share %', '0'))
 
@@ -76,7 +80,7 @@ class CWREngine:
             lines.append(f"SPT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(SUB_PUB['internal_id'], 9)}      {pr}{mr}{mr}I0826 001")
             rec_seq += 1
 
-        for i in range(1, 4):
+        for i in range(1, 10):
             w_last = str(row.get(f'WRITER {i}: Last Name', '')).strip().upper()
             if not w_last or w_last == 'NAN': continue
             w_id = WRITER_ID_MAP.get(w_last, f"00000000{i}")
@@ -84,20 +88,42 @@ class CWREngine:
             w_soc = SOCIETY_MAP.get(row.get(f'WRITER {i}: Society', ''), '021')
             w_pr = self.format_share(row.get(f'WRITER {i}: Owner Performance Share %', '0'))
             w_op = str(row.get(f'WRITER {i}: Original Publisher', '')).strip().upper()
-            agree = pub_links.get(w_op, "0000000")
+            p_match = pub_links.get(w_op, {"agreement": "0000000", "internal_id": "000000000"})
 
-            lines.append(f"SWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(w_id, 9)}{self.pad(w_last, 45)}{self.pad(row.get(f'WRITER {i}: First Name', ''), 30)} C          {w_ipi}{w_soc}{w_pr}0990000009900000 N")
+            # SWR Grid Injection
+            swr = list(self.pad("", 152))
+            swr[0:3] = list("SWR")
+            swr[3:11] = list(tid)
+            swr[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
+            swr[19:28] = list(w_id)
+            swr[28:73] = list(self.pad(w_last, 45))
+            swr[73:103] = list(self.pad(row.get(f'WRITER {i}: First Name', ''), 30))
+            swr[104] = "C"
+            swr[115:126] = list(w_ipi)
+            swr[126:135] = list(f"0{w_soc}{w_pr}")
+            swr[135:151] = list("0990000009900000")
+            swr[151] = "N"
+            lines.append("".join(swr))
             rec_seq += 1
+
             lines.append(f"SWT{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad(w_id, 9)}{w_pr}0000000000I2136 001")
             rec_seq += 1
-            # Composite Link Logic: WriterID + WriterIndex (i)
-            writer_link = self.pad(f"{w_id}{i:02d}", 11, 'right', '0')
-            lines.append(f"PWR{tid}{self.pad(rec_seq, 8, 'right', '0')}{self.pad('000000000', 9)}{self.pad(w_op, 45)}                                       {self.pad(agree, 14)}       {writer_link}")
+
+            # PWR Grid Injection
+            pwr = list(self.pad("", 112))
+            pwr[0:3] = list("PWR")
+            pwr[3:11] = list(tid)
+            pwr[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
+            pwr[19:28] = list(p_match['internal_id']) # Bible match
+            pwr[28:73] = list(self.pad(w_op, 45))
+            pwr[87:101] = list(self.pad(p_match['agreement'], 14))
+            pwr[101:112] = list(self.pad(f"{w_id}{i:02d}", 11, 'right', '0'))
+            lines.append("".join(pwr))
             rec_seq += 1
 
-        # 2. REC Records
         isrc = self.pad(row.get('CODE: ISRC', ''), 12)
         album_code = self.pad(row.get('ALBUM: Code', ''), 15)
+        # REC Grid Injection
         rec1 = list(self.pad("", 507))
         rec1[0:3] = list("REC")
         rec1[3:11] = list(tid)
@@ -126,17 +152,15 @@ class CWREngine:
         lines.append("".join(rec2))
         rec_seq += 1
         
-        # 3. ORN Record
-        album_title = self.pad(row.get('ALBUM: Title', ''), 45)
-        track_num = self.pad(row.get('TRACK: Number', '1'), 4, 'right', '0')
+        # ORN Grid Injection
         orn = list(self.pad("", 109))
         orn[0:3] = list("ORN")
         orn[3:11] = list(tid)
         orn[11:19] = list(self.pad(rec_seq, 8, 'right', '0'))
         orn[19:22] = list("LIB")
-        orn[22:67] = list(album_title)
+        orn[22:67] = list(self.pad(row.get('ALBUM: Title', ''), 45))
         orn[82:82+len(album_code)] = list(album_code)
-        orn[97:101] = list(track_num)
+        orn[97:101] = list(self.pad(row.get('TRACK: Number', '1'), 4, 'right', '0'))
         orn[101:109] = list("RED COLA")
         lines.append("".join(orn))
 
