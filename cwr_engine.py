@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime
 import math
 
-# --- CONFIGURATION ---
+# --- 1. CONFIGURATION & DATABASE ---
 LUMINA_CONFIG = {
     "name": "LUMINA PUBLISHING UK",
     "ipi": "01254514077",
@@ -17,15 +17,39 @@ PUBLISHER_DB = {
     "SNOOPLE": {"name": "SNOOPLE SONGS", "ipi": "00610526488", "agreement": "13990221"}
 }
 
-def pad(val, length, is_num=False):
-    """Strict CWR Padding."""
-    if pd.isna(val): val = ""
-    val = str(val).strip().upper()
-    if is_num and val.endswith('.0'): val = val[:-2]
-    return val.zfill(length) if is_num else val.ljust(length)[:length]
+# --- 2. STRICT GEOMETRY ASSEMBLER ---
+class CwrLine:
+    """Constructs a fixed-width CWR line by placing data at exact indices."""
+    def __init__(self, record_type):
+        self.buffer = [' '] * 512 # Standard CWR max length
+        self.write(0, record_type)
+        
+    def write(self, start, val, length=None, is_num=False):
+        if pd.isna(val): val = ""
+        s_val = str(val).strip().upper()
+        
+        if is_num:
+            # Clean float artifacts (e.g. "123.0" -> "123")
+            if s_val.endswith('.0'): s_val = s_val[:-2]
+            # Remove non-numeric (except maybe leading/trailing which we stripped)
+            s_val = ''.join(filter(str.isdigit, s_val))
+            formatted = s_val.zfill(length) if length else s_val
+        else:
+            formatted = s_val.ljust(length) if length else s_val
+            
+        # Truncate if too long
+        if length: formatted = formatted[:length]
+        
+        # Write to buffer
+        for i, char in enumerate(formatted):
+            if start + i < len(self.buffer):
+                self.buffer[start + i] = char
+                
+    def __str__(self):
+        return "".join(self.buffer).rstrip()
 
+# --- 3. HELPER FUNCTIONS ---
 def format_share(val):
-    """Converts 16.5 -> 01650."""
     try:
         if pd.isna(val) or str(val).strip() == '': return "00000"
         return f"{int(round(float(val) * 100)):05d}"
@@ -35,41 +59,55 @@ def get_pub_data(raw_name):
     raw = str(raw_name).upper()
     for key, data in PUBLISHER_DB.items():
         if key in raw: return data
-    return {"name": pad(raw_name, 45), "ipi": "00000000000", "agreement": "00000000"}
+    return {"name": raw_name[:45], "ipi": "00000000000", "agreement": "00000000"}
 
+# --- 4. GENERATION LOGIC ---
 def generate_cwr_content(df):
     lines = []
-    now_d, now_t = datetime.now().strftime("%Y%m%d"), datetime.now().strftime("%H%M%S")
+    now_d = datetime.now().strftime("%Y%m%d")
+    now_t = datetime.now().strftime("%H%M%S")
     
-    # HEADER (Matches London format)
-    lines.append(f"HDR{pad(LUMINA_CONFIG['ipi'], 11)}LUMINA PUBLISHING UK                         01.10{now_d}{now_t}{now_d}               2.2001BACKBEAT")
+    # HDR
+    hdr = CwrLine("HDR")
+    hdr.write(3, LUMINA_CONFIG['ipi'], 11, True) # Sender IPI
+    hdr.write(14, LUMINA_CONFIG['name'], 45)     # Sender Name
+    hdr.write(59, "01.10")                       # Version
+    hdr.write(64, now_d)                         # Creation Date
+    hdr.write(72, now_t)                         # Creation Time
+    hdr.write(78, now_d)                         # Transmission Date
+    hdr.write(98, "BACKBEAT")                    # Character Set (match Parity)
+    lines.append(str(hdr))
+
+    # GRH
     lines.append("GRHREV0000102.200000000001")
 
     for i, row in df.iterrows():
-        # London files start transaction counts at 00000000 for the REV line
         t_seq = i 
         
-        # --- METADATA ---
-        # Logic: Use ISWC first, then Song Number, then Track Number
-        raw_id = row.get('CODE: ISWC')
-        if pd.isna(raw_id): raw_id = row.get('Song_Number')
-        if pd.isna(raw_id): raw_id = str(row.get('TRACK: Number', '0')).zfill(7)
+        # ID Logic: Use Song_Number or Track Number
+        raw_id = row.get('Song_Number')
+        if pd.isna(raw_id): raw_id = row.get('CODE: Song Code')
+        if pd.isna(raw_id): raw_id = f"{int(row.get('TRACK: Number', 0)):07d}"
         
-        # London Parity uses '0003606' style IDs in the Work ID field (Pos 60)
-        # We map your CSV 'Song_Number' or 'Track Number' here.
-        submitter_id = pad(raw_id, 14)
+        submitter_id = raw_id # Pos 79
         
-        title = pad(row.get('TRACK: Title', 'UNKNOWN TITLE'), 60)
-        iswc = pad(row.get('CODE: ISWC', ''), 11)
-        if not iswc.startswith('T'): iswc = '           '
-
-        # REV RECORD (Fixed 12-space gap before UNC)
-        lines.append(f"REV{t_seq:08d}00000000{title}   {submitter_id}{iswc}00000000            UNC000025Y      ORI{' '*52}00000000000{' '*51}Y")
+        # --- REV RECORD ---
+        rev = CwrLine("REV")
+        rev.write(3, f"{t_seq:08d}")             # Transaction Seq
+        rev.write(11, "00000000")                # Record Seq
+        rev.write(19, row.get('TRACK: Title', 'UNKNOWN'), 60) # Title
+        rev.write(79, submitter_id, 14)          # Submitter Work ID
+        rev.write(93, row.get('CODE: ISWC', ''), 11) # ISWC
+        rev.write(104, "00000000")               # Date
+        rev.write(124, "UNC")                    # Category
+        rev.write(127, "000025")                 # Duration (Fixed as per Parity)
+        rev.write(133, "Y")                      # Recorded Indicator
+        lines.append(str(rev))
 
         rec_seq = 1
-        pub_map = {} # To link Writers to Publishers later
+        pub_map = {}
 
-        # --- PUBLISHERS ---
+        # --- PUBLISHER LOOP ---
         for p_idx in range(1, 4):
             p_name = row.get(f'PUBLISHER {p_idx}: Name')
             if pd.isna(p_name): continue
@@ -79,31 +117,76 @@ def generate_cwr_content(df):
             p_share_mr = format_share(row.get(f'PUBLISHER {p_idx}: Collection Mechanical Share %'))
             
             # SPU 1: Original
-            lines.append(f"SPU{t_seq:08d}{rec_seq:08d}0{p_idx}00000000{p_idx}{pad(p_data['name'], 45)}E          {pad(p_data['ipi'], 11, True)}              021{p_share_pr}021{p_share_mr}   {format_share(33)} N{' '*28}{pad(p_data['agreement'], 14)}PG")
+            spu = CwrLine("SPU")
+            spu.write(3, f"{t_seq:08d}")
+            spu.write(11, f"{rec_seq:08d}")
+            spu.write(19, "01") # Chain? Parity uses 01
+            spu.write(21, f"00000000{p_idx}") # Publisher ID
+            spu.write(30, p_data['name'], 45)
+            # Geometry Match: Name(30-74) -> Gap(75) -> E(76) -> Gap(77) -> 10 spaces -> IPI(88)
+            spu.write(76, "E") # Role
+            spu.write(88, p_data['ipi'], 11, True)
+            spu.write(101, "021") # Society
+            spu.write(104, p_share_pr, 5) # PR Share
+            spu.write(109, "021") # MR Society
+            spu.write(112, p_share_mr, 5) # MR Share
+            spu.write(117, "03300") # SR Share (Fixed 33% per Parity)
+            spu.write(123, "N") 
+            spu.write(151, p_data['agreement'], 14)
+            spu.write(165, "PG")
+            lines.append(str(spu))
             rec_seq += 1
             
             # SPU 2: Lumina
-            lines.append(f"SPU{t_seq:08d}{rec_seq:08d}0{p_idx}000000012{pad(LUMINA_CONFIG['name'], 45)}{LUMINA_CONFIG['role']}         {pad(LUMINA_CONFIG['ipi'], 11, True)}              052000000330000003300000 N{' '*28}{pad(p_data['agreement'], 14)}PG")
+            spu_l = CwrLine("SPU")
+            spu_l.write(3, f"{t_seq:08d}")
+            spu_l.write(11, f"{rec_seq:08d}")
+            spu_l.write(19, "01")
+            spu_l.write(21, "000000012")
+            spu_l.write(30, LUMINA_CONFIG['name'], 45)
+            spu_l.write(76, "SE")
+            spu_l.write(88, LUMINA_CONFIG['ipi'], 11, True)
+            spu_l.write(104, "05200") # 52%? Parity showed 05200
+            spu_l.write(112, "03300")
+            spu_l.write(117, "03300")
+            spu_l.write(123, "N")
+            spu_l.write(151, p_data['agreement'], 14)
+            spu_l.write(165, "PG")
+            lines.append(str(spu_l))
             rec_seq += 1
             
-            # SPT: Territory
-            lines.append(f"SPT{t_seq:08d}{rec_seq:08d}{p_share_pr}{p_share_mr}{format_share(33)}I{LUMINA_CONFIG['territory']} 001")
+            # SPT
+            lines.append(f"SPT{t_seq:08d}{rec_seq:08d}{p_share_pr}{p_share_mr}03300I{LUMINA_CONFIG['territory']} 001")
             rec_seq += 1
             
-            pub_map[p_data['name']] = {"chain": f"0{p_idx}", "agreement": p_data['agreement'], "orig_data": p_data, "id": p_idx}
+            pub_map[p_data['name']] = {"idx": p_idx, "agreement": p_data['agreement'], "orig": p_data}
 
-        # --- WRITERS ---
+        # --- WRITER LOOP ---
         for w_idx in range(1, 4):
             w_last = row.get(f'WRITER {w_idx}: Last Name')
             if pd.isna(w_last): continue
             
-            w_first = pad(row.get(f'WRITER {w_idx}: First Name', ''), 30)
-            w_ipi = pad(row.get(f'WRITER {w_idx}: IPI'), 11, True)
+            w_first = row.get(f'WRITER {w_idx}: First Name', '')
+            w_ipi = row.get(f'WRITER {w_idx}: IPI')
             w_pr = format_share(row.get(f'WRITER {w_idx}: Collection Performance Share %'))
             
             # SWR
-            swr_seq = rec_seq # Capture sequence for PWR linking
-            lines.append(f"SWR{t_seq:08d}{rec_seq:08d}00000000{w_idx}{pad(w_last, 45)}{w_first} C          {w_ipi}{w_pr}00000990000009900000 N")
+            swr = CwrLine("SWR")
+            swr.write(3, f"{t_seq:08d}")
+            swr.write(11, f"{rec_seq:08d}")
+            swr.write(19, f"00000000{w_idx}") # Writer ID
+            swr.write(28, w_last, 45)
+            swr.write(73, w_first, 30)
+            swr.write(104, "C ") # Capacity
+            swr.write(115, w_ipi, 11, True)
+            swr.write(126, w_pr, 5) # PR
+            swr.write(131, "00000") # MR
+            swr.write(136, "099") # Society?
+            swr.write(139, "00000") 
+            swr.write(144, "099")
+            swr.write(147, "00000")
+            swr.write(152, "N")
+            lines.append(str(swr))
             rec_seq += 1
             
             # SWT
@@ -112,24 +195,48 @@ def generate_cwr_content(df):
             
             # PWR
             orig_pub_name = str(row.get(f'WRITER {w_idx}: Original Publisher')).upper()
-            linked_pub = next((v for k, v in pub_map.items() if k in orig_pub_name), None)
+            linked = next((v for k, v in pub_map.items() if k in orig_pub_name), None)
             
-            if linked_pub:
-                # The "Writer IP #" in PWR (Pos 116-124) must match the SWR Record Sequence? 
-                # London Parity uses a specific ID logic here. We use the SWR row index relative to the transaction.
-                # London Example: 000000001 (Writer 1), 000000002 (Writer 2).
-                writer_ref_id = f"{w_idx:09d}" 
-                lines.append(f"PWR{t_seq:08d}{rec_seq:08d}{linked_pub['chain']}00000000{linked_pub['id']}{pad(linked_pub['orig_data']['name'], 45)}{pad(linked_pub['agreement'], 14)}{writer_ref_id}")
+            if linked:
+                pwr = CwrLine("PWR")
+                pwr.write(3, f"{t_seq:08d}")
+                pwr.write(11, f"{rec_seq:08d}")
+                pwr.write(19, f"{linked['idx']:02d}") # Chain 
+                pwr.write(21, f"00000000{linked['idx']}") # Pub ID
+                pwr.write(30, linked['orig']['name'], 45)
+                pwr.write(75, linked['agreement'], 14)
+                pwr.write(89, f"000000{w_idx:03d}01") # Writer Ref matching Parity logic
+                lines.append(str(pwr))
                 rec_seq += 1
 
         # --- ARTIFACTS ---
-        cd_id = pad(row.get('ALBUM: Code', 'RC052'), 14)
-        isrc = pad(row.get('CODE: ISRC', ''), 12)
-        lines.append(f"REC{t_seq:08d}{rec_seq:08d}{now_d}{' '*54}000000{' '*80}{cd_id}{' '*10}{isrc}  CD{' '*103}RED COLA{' '*52}Y")
+        # REC
+        cd_id = row.get('ALBUM: Code', 'RC052')
+        isrc = row.get('CODE: ISRC', '')
+        
+        rec = CwrLine("REC")
+        rec.write(3, f"{t_seq:08d}")
+        rec.write(11, f"{rec_seq:08d}")
+        rec.write(19, now_d)
+        rec.write(74, "000000")
+        rec.write(154, cd_id, 14)
+        rec.write(180, isrc, 12)
+        rec.write(194, "CD")
+        rec.write(297, "RED COLA")
+        rec.write(349, "Y")
+        lines.append(str(rec))
         rec_seq += 1
-        lines.append(f"REC{t_seq:08d}{rec_seq:08d}{' '*68}000000{' '*94}{isrc}  DW {pad(row.get('TRACK: Title'), 60)}{' '*84}Y")
-        rec_seq += 1
-        lines.append(f"ORN{t_seq:08d}{rec_seq:08d}LIB{pad(row.get('ALBUM: Title'), 60).upper()}{cd_id}          0001RED COLA")
+        
+        # ORN
+        orn = CwrLine("ORN")
+        orn.write(3, f"{t_seq:08d}")
+        orn.write(11, f"{rec_seq:08d}")
+        orn.write(19, "LIB")
+        orn.write(22, row.get('ALBUM: Title', 'UNKNOWN'), 60)
+        orn.write(82, cd_id, 14)
+        orn.write(96, "0001") # Year/Seq? Parity had 0254 or 0001
+        orn.write(100, "RED COLA")
+        lines.append(str(orn))
 
     lines.append(f"GRT00001{len(df):08d}{len(lines)+1:08d}")
     lines.append(f"TRL00001{len(df):08d}{len(lines)+1:08d}")
