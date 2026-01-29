@@ -17,30 +17,26 @@ PUBLISHER_DB = {
     "SNOOPLE": {"name": "SNOOPLE SONGS", "ipi": "00610526488", "agreement": "13990221"}
 }
 
-# --- 2. STRICT GEOMETRY ASSEMBLER ---
+# --- 2. STRICT GEOMETRY ASSEMBLER (CWR 2.2 SPEC) ---
 class CwrLine:
-    """Constructs a fixed-width CWR line by placing data at exact Parity indices."""
     def __init__(self, record_type):
-        self.buffer = [' '] * 512 # Buffer
+        self.buffer = [' '] * 512 
         self.write(0, record_type)
         
     def write(self, start, val, length=None, is_num=False):
         if pd.isna(val): val = ""
         s_val = str(val).strip().upper()
-        
         if is_num:
             if s_val.endswith('.0'): s_val = s_val[:-2]
             s_val = ''.join(filter(str.isdigit, s_val))
             formatted = s_val.zfill(length) if length else s_val
         else:
             formatted = s_val.ljust(length) if length else s_val
-            
         if length: formatted = formatted[:length]
-        
         for i, char in enumerate(formatted):
             if start + i < len(self.buffer):
                 self.buffer[start + i] = char
-                
+    
     def __str__(self):
         return "".join(self.buffer).rstrip()
 
@@ -63,7 +59,7 @@ def generate_cwr_content(df):
     now_d = datetime.now().strftime("%Y%m%d")
     now_t = datetime.now().strftime("%H%M%S")
     
-    # HDR (Matches Parity Offset)
+    # HDR (Standard 2.2)
     hdr = CwrLine("HDR")
     hdr.write(3, LUMINA_CONFIG['ipi'], 11, True)
     hdr.write(14, LUMINA_CONFIG['name'], 45)
@@ -73,7 +69,6 @@ def generate_cwr_content(df):
     hdr.write(78, now_d)
     hdr.write(98, "BACKBEAT") 
     lines.append(str(hdr))
-
     lines.append("GRHREV0000102.200000000001")
 
     for i, row in df.iterrows():
@@ -83,26 +78,18 @@ def generate_cwr_content(df):
         raw_id = row.get('Song_Number')
         if pd.isna(raw_id): raw_id = row.get('CODE: Song Code')
         if pd.isna(raw_id): raw_id = f"{int(row.get('TRACK: Number', 0)):07d}"
-        
         submitter_id = raw_id
         
-        # --- REV RECORD ---
+        # REV RECORD
         rev = CwrLine("REV")
         rev.write(3, f"{t_seq:08d}")
         rev.write(11, "00000000")
         rev.write(19, row.get('TRACK: Title', 'UNKNOWN'), 60)
-        
-        # GEOMETRY FIX: ID at 81 (was 79)
         rev.write(81, submitter_id, 14)
-        
-        # GEOMETRY FIX: ISWC at 95 (was 93)
         rev.write(95, row.get('CODE: ISWC', ''), 11)
-        
-        rev.write(106, "00000000") # Date placeholder
-        
-        # GEOMETRY FIX: UNC at 126 (was 124)
+        rev.write(106, "00000000") 
         rev.write(126, "UNC")
-        rev.write(129, "000025") # Duration
+        rev.write(129, "000025") 
         rev.write(135, "Y")
         lines.append(str(rev))
 
@@ -126,23 +113,19 @@ def generate_cwr_content(df):
             spu.write(21, f"00000000{p_idx}")
             spu.write(30, p_data['name'], 45)
             spu.write(76, "E") 
-            
-            # GEOMETRY FIX: IPI at 87 (was 88)
             spu.write(87, p_data['ipi'], 11, True)
-            
-            # GEOMETRY FIX: PR Soc at 112 (was 101)
-            spu.write(112, "021") 
+            spu.write(112, "021") # PR Soc
             spu.write(115, p_share_pr, 5)
-            
-            # GEOMETRY FIX: MR Soc at 120 (was 109)
-            spu.write(120, "021")
+            spu.write(120, "021") # MR Soc
             spu.write(123, p_share_mr, 5)
             
-            # GEOMETRY FIX: SR Share at 131
-            spu.write(131, "03300")
-            spu.write(137, "N")
+            # MANUAL FIX: Pos 128 is "SR Society" (3 chars). Leave empty for now.
+            spu.write(128, "   ") 
             
-            # GEOMETRY FIX: Agreement at 166 (was 151)
+            # MANUAL FIX: Pos 131 is "SR Share" (5 chars).
+            spu.write(131, "03300")
+            
+            spu.write(137, "N")
             spu.write(166, p_data['agreement'], 14)
             spu.write(180, "PG")
             lines.append(str(spu))
@@ -157,15 +140,12 @@ def generate_cwr_content(df):
             spu_l.write(30, LUMINA_CONFIG['name'], 45)
             spu_l.write(76, "SE")
             spu_l.write(87, LUMINA_CONFIG['ipi'], 11, True)
-            spu_l.write(112, "052") # PR Soc?? Parity had 05200 at 104? No, check Parity
-            # Parity Lumina: ...01254514077              05200000033...
-            # IPI @ 87. Gap. '052' starts at 112 (25 chars gap?)
-            # Let's trust the Tarmac offsets apply to columns.
             spu_l.write(112, "052") 
-            spu_l.write(115, "00000") # Lumina 0% PR Share?
+            spu_l.write(115, "00000") 
             spu_l.write(120, "033") 
             spu_l.write(123, "00000") 
-            spu_l.write(131, "03300") # Sync 33%
+            spu_l.write(128, "   ") # SR Soc
+            spu_l.write(131, "03300") # SR Share
             spu_l.write(137, "N")
             spu_l.write(166, p_data['agreement'], 14)
             spu_l.write(180, "PG")
@@ -173,11 +153,8 @@ def generate_cwr_content(df):
             rec_seq += 1
             
             # SPT
-            # Matches Parity: SPT... 01650 03300 03300...
-            # Parity SPT indices are likely standard.
             lines.append(f"SPT{t_seq:08d}{rec_seq:08d}{p_share_pr}{p_share_mr}03300I{LUMINA_CONFIG['territory']} 001")
             rec_seq += 1
-            
             pub_map[p_data['name']] = {"idx": p_idx, "agreement": p_data['agreement'], "orig": p_data}
 
         # --- WRITER LOOP ---
@@ -199,9 +176,9 @@ def generate_cwr_content(df):
             swr.write(104, "C ")
             swr.write(115, w_ipi, 11, True)
             
-            # GEOMETRY FIX: PR Soc at 126
-            swr.write(126, "021") # BMI/PRS mapped to 021 for Parity? Or dynamic?
-            # Using 021 (PRS) as per Parity example.
+            # MANUAL FIX: Pos 126 is "PR Society" (3 chars)
+            swr.write(126, "021") 
+            
             swr.write(129, w_pr, 5)
             swr.write(134, "099") # MR Soc
             swr.write(137, "00000")
@@ -223,21 +200,18 @@ def generate_cwr_content(df):
                 pwr = CwrLine("PWR")
                 pwr.write(3, f"{t_seq:08d}")
                 pwr.write(11, f"{rec_seq:08d}")
-                pwr.write(19, f"{linked['idx']:02d}") # Chain 
-                pwr.write(21, f"00000000{linked['idx']}") # Pub ID
-                
-                # GEOMETRY FIX: Name at 28 (was 30)
+                pwr.write(19, f"{linked['idx']:02d}") 
+                pwr.write(21, f"00000000{linked['idx']}") 
                 pwr.write(28, linked['orig']['name'], 45)
-                
-                # GEOMETRY FIX: Agreement at 87 (was 75)
                 pwr.write(87, linked['agreement'], 14)
                 
-                # GEOMETRY FIX: Writer Ref at 101
+                # MANUAL FIX: Pos 101 is "Writer IP #" (11 chars)
                 pwr.write(101, f"000000{w_idx:03d}01") 
+                
                 lines.append(str(pwr))
                 rec_seq += 1
 
-        # --- ARTIFACTS ---
+        # RECORDS & ORIGIN
         cd_id = row.get('ALBUM: Code', 'RC052')
         isrc = row.get('CODE: ISRC', '')
         
@@ -254,7 +228,6 @@ def generate_cwr_content(df):
         lines.append(str(rec))
         rec_seq += 1
         
-        # ORN
         orn = CwrLine("ORN")
         orn.write(3, f"{t_seq:08d}")
         orn.write(11, f"{rec_seq:08d}")
