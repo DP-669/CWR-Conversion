@@ -3,35 +3,34 @@ from datetime import datetime
 
 # ==============================================================================
 # MODULE 1: THE BLUEPRINTS (GEOMETRY LAYER)
-# Defines EXACTLY where fields start and how long they are.
 # ==============================================================================
 
 class Blueprints:
-    # HDR: Header Record
+    # HDR: Header Record (Aligned to ICE)
     HDR = [
-        (0,  3,  "HDR"),           # Record Type
-        (3,  11, "{sender_ipi}"),  # Sender IPI
-        (14, 45, "{sender_name}"), # Sender Name
-        (59, 5,  "01.10"),         # Version
-        (64, 8,  "{date}"),        # Creation Date
-        (72, 6,  "{time}"),        # Creation Time
-        (78, 8,  "{date}"),        # Transmission Date
-        (98, 8,  "BACKBEAT")       # Character Set
+        (0,  3,  "HDR"),           
+        (3,  11, "{sender_ipi}"),  
+        (14, 45, "{sender_name}"), 
+        (59, 5,  "01.10"),         
+        (64, 8,  "{date}"),        
+        (72, 6,  "{time}"),        
+        (78, 8,  "{date}"),        
+        (98, 8,  "BACKBEAT")       
     ]
 
     # REV: Work Registration Record
     REV = [
         (0,   3,  "REV"),
-        (3,   8,  "{t_seq}"),      # Transaction Sequence
-        (11,  8,  "00000000"),     # Link
-        (19,  60, "{title}"),      # Work Title
-        (79,  2,  "  "),           # Gap
-        (81,  14, "{work_id}"),    # Submitter Work ID
-        (95,  11, "{iswc}"),       # ISWC
-        (106, 8,  "00000000"),     # Date of Copyright
-        (126, 3,  "UNC"),          # Copyright Status
-        (129, 6,  "000025"),       # Duration
-        (135, 1,  "Y")             # Recorded Indicator
+        (3,   8,  "{t_seq}"),      
+        (11,  8,  "00000000"),     
+        (19,  60, "{title}"),      
+        (79,  2,  "  "),           
+        (81,  14, "{work_id}"),    
+        (95,  11, "{iswc}"),       
+        (106, 8,  "00000000"),     
+        (126, 3,  "UNC"),          
+        (129, 6,  "000025"),       
+        (135, 1,  "Y")             
     ]
 
     # SPU: Publisher Record
@@ -61,7 +60,7 @@ class Blueprints:
         (3,   8,  "{t_seq}"),
         (11,  8,  "{rec_seq}"),
         (19,  9,  "{pub_id}"),     
-        (28,  6,  "      "),       # 6-Space Gap (Critical)
+        (28,  6,  "      "),       
         (34,  5,  "{pr_share}"),
         (39,  5,  "{mr_share}"),
         (44,  5,  "{sr_share}"),
@@ -104,13 +103,13 @@ class Blueprints:
     ]
 
     # PWR: Publisher-Writer Link Record
+    # [FIXED]: Removed Chain ID to match ICE Bible format
     PWR = [
         (0,   3,  "PWR"),
         (3,   8,  "{t_seq}"),
         (11,  8,  "{rec_seq}"),
-        (19,  2,  "{chain_id}"),   
-        (21,  9,  "{pub_id}"),
-        (28,  45, "{pub_name}"),
+        (19,  9,  "{pub_id}"),     # Starts at 19
+        (28,  45, "{pub_name}"),   # Starts at 28
         (87,  14, "{agreement}"),
         (101, 11, "{writer_ref}")  
     ]
@@ -120,13 +119,13 @@ class Blueprints:
         (0,   3,  "REC"),
         (3,   8,  "{t_seq}"),
         (11,  8,  "{rec_seq}"),
-        (19,  8,  "00000000"),     # Date (Blank)
-        (74,  6,  "000000"),       # Duration
+        (19,  8,  "00000000"),     
+        (74,  6,  "000000"),       
         (154, 14, "{cd_id}"),
         (180, 12, "{isrc}"),
-        (194, 2,  "{source}"),     # CD or DW
-        (197, 60, "{title}"),      # Title (For DW)
-        (297, 60, "{label}"),      # Label (For CD)
+        (194, 2,  "{source}"),     
+        (197, 60, "{title}"),      
+        (297, 60, "{label}"),      
         (349, 1,  "Y")
     ]
 
@@ -151,23 +150,18 @@ class Assembler:
         self.buffer = [' '] * 512
 
     def build(self, blueprint, data_dict):
-        self.buffer = [' '] * 512 # Reset buffer
+        self.buffer = [' '] * 512 
         
         for start, length, value_template in blueprint:
-            # 1. Resolve Value
             if value_template.startswith("{") and value_template.endswith("}"):
                 key = value_template[1:-1]
                 val = str(data_dict.get(key, ""))
             else:
                 val = value_template
             
-            # 2. Format Value
             val = val.strip().upper()
-            
-            # 3. Truncate/Pad
             val = val.ljust(length)[:length]
             
-            # 4. Write to Buffer
             for i, char in enumerate(val):
                 if start + i < 512:
                     self.buffer[start + i] = char
@@ -178,18 +172,7 @@ class Assembler:
 # MODULE 3: THE DATA LOGIC (BUSINESS LAYER)
 # ==============================================================================
 
-LUMINA_CONFIG = {
-    "name": "LUMINA PUBLISHING UK",
-    "ipi": "01254514077",
-    "territory": "0826"
-}
-
-PUBLISHER_DB = {
-    "TARMAC": {"name": "TARMAC 1331 PUBLISHING", "ipi": "00356296239", "agreement": "6781310"},
-    "PASHALINA": {"name": "PASHALINA PUBLISHING", "ipi": "00498578867", "agreement": "4316161"},
-    "MANNY": {"name": "MANNY G MUSIC", "ipi": "00515125979", "agreement": "13997451"},
-    "SNOOPLE": {"name": "SNOOPLE SONGS", "ipi": "00610526488", "agreement": "13990221"}
-}
+from mapping_config import LUMINA_CONFIG, PUBLISHER_DB
 
 def fmt_share(val):
     try:
@@ -222,7 +205,6 @@ def generate_cwr_content(df):
 
     # 2. TRANSACTIONS
     for i, row in df.iterrows():
-        # --- SAFE VARIABLES (Prevents NameError) ---
         t_seq = f"{i:08d}"
         
         # ID Logic
@@ -232,7 +214,6 @@ def generate_cwr_content(df):
             track_num = int(row.get('TRACK: Number', 0))
             raw_id = f"{track_num:07d}"
         
-        # Explicit Variable Assignment
         submitter_id = str(raw_id)
         title_val = str(row.get('TRACK: Title', 'UNKNOWN TITLE'))
         iswc_val = str(row.get('CODE: ISWC', ''))
@@ -240,7 +221,6 @@ def generate_cwr_content(df):
         cd_id_val = str(row.get('ALBUM: Code', 'RC052'))
         album_title_val = str(row.get('ALBUM: Title', 'UNKNOWN'))
         
-        # Context Dictionary
         ctx = {
             "t_seq": t_seq,
             "title": title_val,
@@ -252,7 +232,7 @@ def generate_cwr_content(df):
             "label": "RED COLA"
         }
         
-        # REV Record
+        # REV
         lines.append(asm.build(Blueprints.REV, ctx))
         
         rec_seq = 1
@@ -296,7 +276,7 @@ def generate_cwr_content(df):
                 "ipi": LUMINA_CONFIG['ipi'],
                 "pr_soc": "052", "pr_share": "00000",
                 "mr_soc": "033", "mr_share": "00000",
-                "sr_soc": "033", "sr_share": "00000" # Zero Share
+                "sr_soc": "033", "sr_share": "00000" 
             })
             lines.append(asm.build(Blueprints.SPU, ctx_lum))
             rec_seq += 1
@@ -354,10 +334,11 @@ def generate_cwr_content(df):
             linked = next((v for k, v in pub_map.items() if k in orig_pub), None)
             
             if linked:
+                # [FIXED] PWR now uses simplified context (No chain_id)
                 ctx_pwr = {
                     "t_seq": t_seq,
                     "rec_seq": f"{rec_seq:08d}",
-                    "chain_id": "00",
+                    # "chain_id": "00", # REMOVED to match ICE
                     "pub_id": f"00000000{linked['idx']}",
                     "pub_name": linked['orig']['name'],
                     "agreement": linked['agreement'],
@@ -367,39 +348,23 @@ def generate_cwr_content(df):
                 rec_seq += 1
 
         # --- ARTIFACTS ---
-        # REC 1 (CD)
         ctx_rec_cd = {
-            "t_seq": t_seq,
-            "rec_seq": f"{rec_seq:08d}",
-            "cd_id": cd_id_val,
-            "isrc": isrc_val,
-            "source": "CD",
-            "title": "", # Blank for CD
-            "label": "RED COLA"
+            "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}",
+            "cd_id": cd_id_val, "isrc": isrc_val, "source": "CD", "title": "", "label": "RED COLA"
         }
         lines.append(asm.build(Blueprints.REC, ctx_rec_cd))
         rec_seq += 1
         
-        # REC 2 (DW)
         ctx_rec_dw = {
-            "t_seq": t_seq,
-            "rec_seq": f"{rec_seq:08d}",
-            "cd_id": "", # Blank for DW
-            "isrc": isrc_val,
-            "source": "DW",
-            "title": title_val,
-            "label": "" # Blank for DW
+            "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}",
+            "cd_id": "", "isrc": isrc_val, "source": "DW", "title": title_val, "label": ""
         }
         lines.append(asm.build(Blueprints.REC, ctx_rec_dw))
         rec_seq += 1
         
-        # ORN
         ctx_orn = {
-            "t_seq": t_seq,
-            "rec_seq": f"{rec_seq:08d}",
-            "library": album_title_val.upper(),
-            "cd_id": cd_id_val,
-            "label": "RED COLA"
+            "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}",
+            "library": album_title_val.upper(), "cd_id": cd_id_val, "label": "RED COLA"
         }
         lines.append(asm.build(Blueprints.ORN, ctx_orn))
 
