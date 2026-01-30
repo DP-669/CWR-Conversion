@@ -97,4 +97,85 @@ def generate_cwr_content(df):
         rec_seq = 1
         pub_map = {}
 
-        # --- PUBLIS
+        # --- PUBLISHER LOOP ---
+        for p_idx in range(1, 4):
+            p_name = row.get(f'PUBLISHER {p_idx}: Name')
+            if pd.isna(p_name): continue
+            
+            p_data = get_pub_data(p_name)
+            p_share_pr = format_share(row.get(f'PUBLISHER {p_idx}: Collection Performance Share %'))
+            p_share_mr = format_share(row.get(f'PUBLISHER {p_idx}: Collection Mechanical Share %'))
+            
+            # SPU 1: Original
+            spu = CwrLine("SPU")
+            spu.write(3, f"{t_seq:08d}")
+            spu.write(11, f"{rec_seq:08d}")
+            spu.write(19, f"{p_idx:02d}") # Chain ID
+            spu.write(21, f"00000000{p_idx}")
+            spu.write(30, p_data['name'], 45)
+            spu.write(76, "E") 
+            spu.write(87, p_data['ipi'], 11, True)
+            spu.write(112, "021") 
+            spu.write(115, p_share_pr, 5)
+            spu.write(120, "021") 
+            spu.write(123, p_share_mr, 5)
+            spu.write(128, "   ") 
+            spu.write(131, "03300") 
+            spu.write(137, "N")
+            spu.write(166, p_data['agreement'], 14)
+            spu.write(180, "PG")
+            lines.append(str(spu))
+            rec_seq += 1
+            
+            # SPU 2: Lumina
+            spu_l = CwrLine("SPU")
+            spu_l.write(3, f"{t_seq:08d}")
+            spu_l.write(11, f"{rec_seq:08d}")
+            spu_l.write(19, f"{p_idx:02d}") # Same Chain
+            spu_l.write(21, "000000012")
+            spu_l.write(30, LUMINA_CONFIG['name'], 45)
+            spu_l.write(76, "SE")
+            spu_l.write(87, LUMINA_CONFIG['ipi'], 11, True)
+            spu_l.write(112, "052") 
+            spu_l.write(115, "00000") 
+            spu_l.write(120, "033") 
+            spu_l.write(123, "00000") 
+            spu_l.write(128, "033") 
+            
+            # FIX: Zero Share for Lumina SPU (Matches Official)
+            spu_l.write(131, "00000") 
+            
+            spu_l.write(137, "N")
+            spu_l.write(166, p_data['agreement'], 14)
+            spu_l.write(180, "PG")
+            lines.append(str(spu_l))
+            rec_seq += 1
+            
+            # SPT
+            spt = CwrLine("SPT")
+            spt.write(3, f"{t_seq:08d}")
+            spt.write(11, f"{rec_seq:08d}")
+            spt.write(19, "000000012") 
+            
+            # FIX: 6-Space Gap (Pos 28-33) - Writes start at 34? 
+            # Wait, Pos 28 (1-based) is Index 27?
+            # Standard SPT: Pub ID at 20 (Len 9) -> Ends 28. 
+            # Share 1 at 30 (Len 5)? 
+            # Let's trust the Geometry check from diff analysis:
+            # "Off: ...012      01650..." -> 6 spaces.
+            # ID ends at index 27 (start 19+8?). 000000012 is 9 chars.
+            # 19 + 9 = 28. 
+            # 28 + 6 spaces = 34.
+            spt.write(34, p_share_pr, 5)
+            spt.write(39, p_share_mr, 5)
+            spt.write(44, "03300")
+            spt.write(49, "I")
+            spt.write(50, LUMINA_CONFIG['territory'])
+            spt.write(55, "001")
+            lines.append(str(spt))
+            rec_seq += 1
+            
+            pub_map[p_data['name']] = {"idx": p_idx, "agreement": p_data['agreement'], "orig": p_data}
+
+        # --- WRITER LOOP ---
+        for w_idx in range(
