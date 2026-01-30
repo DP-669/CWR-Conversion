@@ -223,4 +223,63 @@ def generate_cwr_content(df):
             if linked:
                 pwr = CwrLine("PWR")
                 pwr.write(3, f"{t_seq:08d}")
-                pwr.write(11, f"{rec_seq:
+                pwr.write(11, f"{rec_seq:08d}")
+                
+                # FIX: Chain ID '00'
+                pwr.write(19, "00") 
+                pwr.write(21, f"00000000{linked['idx']}") 
+                pwr.write(28, linked['orig']['name'], 45)
+                pwr.write(87, linked['agreement'], 14)
+                
+                # FIX: Writer Ref Format at 101
+                pwr.write(101, f"000000{w_idx:03d}{linked['idx']:02d}") 
+                
+                lines.append(str(pwr))
+                rec_seq += 1
+
+        # RECORDS & ORIGIN
+        cd_id_raw = row.get('ALBUM: Code', 'RC052')
+        isrc = row.get('CODE: ISRC', '')
+        title = row.get('TRACK: Title', 'UNKNOWN TITLE')
+        
+        # REC 1: Audio (CD)
+        rec = CwrLine("REC")
+        rec.write(3, f"{t_seq:08d}")
+        rec.write(11, f"{rec_seq:08d}")
+        
+        # FIX: Zero Date
+        rec.write(19, "00000000")
+        
+        rec.write(74, "000000") # Duration
+        rec.write(154, cd_id_raw, 14)
+        rec.write(180, isrc, 12)
+        rec.write(194, "CD")
+        rec.write(297, "RED COLA")
+        rec.write(349, "Y")
+        lines.append(str(rec))
+        rec_seq += 1
+
+        # REC 2: Digital (DW)
+        rec2 = CwrLine("REC")
+        rec2.write(3, f"{t_seq:08d}")
+        rec2.write(11, f"{rec_seq:08d}")
+        rec2.write(19, "00000000")
+        rec2.write(74, "000000")
+        rec2.write(180, isrc, 12)
+        rec2.write(194, "DW")
+        rec2.write(197, title, 60) # DW Title
+        rec2.write(349, "Y")
+        lines.append(str(rec2))
+        rec_seq += 1
+        
+        orn = CwrLine("ORN")
+        orn.write(3, f"{t_seq:08d}")
+        orn.write(11, f"{rec_seq:08d}")
+        orn.write(19, "LIB")
+        orn.write(22, row.get('ALBUM: Title', 'UNKNOWN'), 60)
+        orn.write(82, cd_id_raw, 14)
+        orn.write(96, "0001")
+        orn.write(100, "RED COLA")
+        lines.append(str(orn))
+
+    lines.append(f"GRT00001{len(df):08
