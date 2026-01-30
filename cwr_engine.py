@@ -4,7 +4,6 @@ from datetime import datetime
 # ==============================================================================
 # MODULE 1: THE BLUEPRINTS (GEOMETRY LAYER)
 # Defines EXACTLY where fields start and how long they are.
-# Based on your "Official CWR Extract.txt"
 # ==============================================================================
 
 class Blueprints:
@@ -26,7 +25,7 @@ class Blueprints:
         (3,   8,  "{t_seq}"),      # Transaction Sequence
         (11,  8,  "00000000"),     # Link
         (19,  60, "{title}"),      # Work Title
-        (79,  2,  "  "),           # Gap (Adjusted for alignment)
+        (79,  2,  "  "),           # Gap
         (81,  14, "{work_id}"),    # Submitter Work ID
         (95,  11, "{iswc}"),       # ISWC
         (106, 8,  "00000000"),     # Date of Copyright
@@ -43,17 +42,17 @@ class Blueprints:
         (19,  2,  "{chain_id}"),
         (21,  9,  "{pub_id}"),
         (30,  45, "{pub_name}"),
-        (76,  2,  "{role}"),       # E or SE
-        (87,  11, "{ipi}"),        # IPI Name #
-        (112, 3,  "{pr_soc}"),     # PR Society
-        (115, 5,  "{pr_share}"),   # PR Share
-        (120, 3,  "{mr_soc}"),     # MR Society
-        (123, 5,  "{mr_share}"),   # MR Share
-        (128, 3,  "{sr_soc}"),     # SR Society
-        (131, 5,  "{sr_share}"),   # SR Share
-        (137, 1,  "N"),            # Special Agreement
-        (166, 14, "{agreement}"),  # Society Assigned Agreement
-        (180, 2,  "PG")            # Agreement Type
+        (76,  2,  "{role}"),       
+        (87,  11, "{ipi}"),        
+        (112, 3,  "{pr_soc}"),     
+        (115, 5,  "{pr_share}"),   
+        (120, 3,  "{mr_soc}"),     
+        (123, 5,  "{mr_share}"),   
+        (128, 3,  "{sr_soc}"),     
+        (131, 5,  "{sr_share}"),   
+        (137, 1,  "N"),            
+        (166, 14, "{agreement}"),  
+        (180, 2,  "PG")            
     ]
 
     # SPT: Publisher Territory Record
@@ -61,14 +60,14 @@ class Blueprints:
         (0,   3,  "SPT"),
         (3,   8,  "{t_seq}"),
         (11,  8,  "{rec_seq}"),
-        (19,  9,  "{pub_id}"),     # Publisher IP #
-        (28,  6,  "      "),       # GAP (Critical Fix)
+        (19,  9,  "{pub_id}"),     
+        (28,  6,  "      "),       # 6-Space Gap (Critical)
         (34,  5,  "{pr_share}"),
         (39,  5,  "{mr_share}"),
         (44,  5,  "{sr_share}"),
-        (49,  1,  "I"),            # Inclusion/Exclusion
-        (50,  4,  "{territory}"),  # Territory Code
-        (55,  3,  "001")           # Share Marker
+        (49,  1,  "I"),            
+        (50,  4,  "{territory}"),  
+        (55,  3,  "001")           
     ]
 
     # SWR: Writer Record
@@ -79,7 +78,7 @@ class Blueprints:
         (19,  9,  "{writer_id}"),
         (28,  45, "{last_name}"),
         (73,  30, "{first_name}"),
-        (104, 2,  "C "),           # Capacity (Composer)
+        (104, 2,  "C "),           
         (115, 11, "{ipi}"),
         (126, 3,  "{pr_soc}"),
         (129, 5,  "{pr_share}"),
@@ -87,7 +86,7 @@ class Blueprints:
         (137, 5,  "{mr_share}"),
         (142, 3,  "{sr_soc}"),
         (145, 5,  "{sr_share}"),
-        (151, 1,  "N")             # Indicator
+        (151, 1,  "N")             
     ]
 
     # SWT: Writer Territory Record
@@ -100,7 +99,7 @@ class Blueprints:
         (33,  5,  "{mr_share}"),
         (38,  5,  "{sr_share}"),
         (43,  1,  "I"),
-        (44,  4,  "2136"),         # World
+        (44,  4,  "2136"),         
         (49,  3,  "001")
     ]
 
@@ -109,11 +108,11 @@ class Blueprints:
         (0,   3,  "PWR"),
         (3,   8,  "{t_seq}"),
         (11,  8,  "{rec_seq}"),
-        (19,  2,  "{chain_id}"),   # Restored Chain ID
+        (19,  2,  "{chain_id}"),   
         (21,  9,  "{pub_id}"),
         (28,  45, "{pub_name}"),
         (87,  14, "{agreement}"),
-        (101, 11, "{writer_ref}")  # 000000 + Writer + Pub
+        (101, 11, "{writer_ref}")  
     ]
 
     # REC: Recording Record
@@ -145,7 +144,6 @@ class Blueprints:
 
 # ==============================================================================
 # MODULE 2: THE ASSEMBLER (EXECUTION LAYER)
-# Dumb engine that takes blueprints and data, and builds lines.
 # ==============================================================================
 
 class Assembler:
@@ -153,32 +151,23 @@ class Assembler:
         self.buffer = [' '] * 512
 
     def build(self, blueprint, data_dict):
-        """
-        Takes a blueprint list and a data dictionary.
-        Injects data into the buffer at specific coordinates.
-        """
         self.buffer = [' '] * 512 # Reset buffer
         
         for start, length, value_template in blueprint:
-            # 1. Resolve Value (Handle placeholders like {title})
+            # 1. Resolve Value
             if value_template.startswith("{") and value_template.endswith("}"):
                 key = value_template[1:-1]
                 val = str(data_dict.get(key, ""))
             else:
                 val = value_template
             
-            # 2. Format Value (Upper, Strip)
+            # 2. Format Value
             val = val.strip().upper()
             
-            # 3. Handle Numeric Padding (if it looks like a number string)
-            # Simple heuristic: If it needs to fill a specific ID slot, zero-pad it.
-            # But standard text is space-padded.
-            # We rely on the Data Layer to pre-format numbers (e.g. "00001").
-            
-            # 4. Truncate/Pad
+            # 3. Truncate/Pad
             val = val.ljust(length)[:length]
             
-            # 5. Write to Buffer
+            # 4. Write to Buffer
             for i, char in enumerate(val):
                 if start + i < 512:
                     self.buffer[start + i] = char
@@ -187,7 +176,6 @@ class Assembler:
 
 # ==============================================================================
 # MODULE 3: THE DATA LOGIC (BUSINESS LAYER)
-# Extracts and cleans data from the CSV.
 # ==============================================================================
 
 LUMINA_CONFIG = {
@@ -234,7 +222,7 @@ def generate_cwr_content(df):
 
     # 2. TRANSACTIONS
     for i, row in df.iterrows():
-        # --- PREPARE ROW DATA ---
+        # --- SAFE VARIABLES (Prevents NameError) ---
         t_seq = f"{i:08d}"
         
         # ID Logic
@@ -244,14 +232,23 @@ def generate_cwr_content(df):
             track_num = int(row.get('TRACK: Number', 0))
             raw_id = f"{track_num:07d}"
         
+        # Explicit Variable Assignment
+        submitter_id = str(raw_id)
+        title_val = str(row.get('TRACK: Title', 'UNKNOWN TITLE'))
+        iswc_val = str(row.get('CODE: ISWC', ''))
+        isrc_val = str(row.get('CODE: ISRC', ''))
+        cd_id_val = str(row.get('ALBUM: Code', 'RC052'))
+        album_title_val = str(row.get('ALBUM: Title', 'UNKNOWN'))
+        
+        # Context Dictionary
         ctx = {
             "t_seq": t_seq,
-            "title": row.get('TRACK: Title', 'UNKNOWN TITLE'),
-            "work_id": raw_id,
-            "iswc": row.get('CODE: ISWC', ''),
-            "cd_id": row.get('ALBUM: Code', 'RC052'),
-            "isrc": row.get('CODE: ISRC', ''),
-            "library": "RED COLA", # Or from CSV
+            "title": title_val,
+            "work_id": submitter_id,
+            "iswc": iswc_val,
+            "cd_id": cd_id_val,
+            "isrc": isrc_val,
+            "library": album_title_val.upper(),
             "label": "RED COLA"
         }
         
@@ -259,7 +256,7 @@ def generate_cwr_content(df):
         lines.append(asm.build(Blueprints.REV, ctx))
         
         rec_seq = 1
-        pub_map = {} # Maps Name -> {idx, agreement, orig_data}
+        pub_map = {} 
 
         # --- PUBLISHERS ---
         for p_idx in range(1, 4):
@@ -299,7 +296,7 @@ def generate_cwr_content(df):
                 "ipi": LUMINA_CONFIG['ipi'],
                 "pr_soc": "052", "pr_share": "00000",
                 "mr_soc": "033", "mr_share": "00000",
-                "sr_soc": "033", "sr_share": "00000" # Fixed Zero Share
+                "sr_soc": "033", "sr_share": "00000" # Zero Share
             })
             lines.append(asm.build(Blueprints.SPU, ctx_lum))
             rec_seq += 1
@@ -374,9 +371,10 @@ def generate_cwr_content(df):
         ctx_rec_cd = {
             "t_seq": t_seq,
             "rec_seq": f"{rec_seq:08d}",
-            "cd_id": ctx['cd_id'],
-            "isrc": ctx['isrc'],
+            "cd_id": cd_id_val,
+            "isrc": isrc_val,
             "source": "CD",
+            "title": "", # Blank for CD
             "label": "RED COLA"
         }
         lines.append(asm.build(Blueprints.REC, ctx_rec_cd))
@@ -387,9 +385,10 @@ def generate_cwr_content(df):
             "t_seq": t_seq,
             "rec_seq": f"{rec_seq:08d}",
             "cd_id": "", # Blank for DW
-            "isrc": ctx['isrc'],
+            "isrc": isrc_val,
             "source": "DW",
-            "title": ctx['title']
+            "title": title_val,
+            "label": "" # Blank for DW
         }
         lines.append(asm.build(Blueprints.REC, ctx_rec_dw))
         rec_seq += 1
@@ -398,17 +397,16 @@ def generate_cwr_content(df):
         ctx_orn = {
             "t_seq": t_seq,
             "rec_seq": f"{rec_seq:08d}",
-            "library": ctx['title'], # ORN Title often matches Track or Album? Using Track for now based on context
-            "cd_id": ctx['cd_id'],
+            "library": album_title_val.upper(),
+            "cd_id": cd_id_val,
             "label": "RED COLA"
         }
-        # Update ORN Logic: Parity showed "LIB" + Album Title. Let's fix that.
-        ctx_orn["library"] = row.get('ALBUM: Title', 'UNKNOWN').upper()
         lines.append(asm.build(Blueprints.ORN, ctx_orn))
 
     # TRAILERS
     count_df = len(df)
     count_lines = len(lines) + 2
+    
     lines.append(f"GRT00001{count_df:08d}{count_lines:08d}")
     lines.append(f"TRL00001{count_df:08d}{count_lines:08d}")
     
