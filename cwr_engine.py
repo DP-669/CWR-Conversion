@@ -106,21 +106,24 @@ def generate_cwr_content(df):
             p_share_pr = format_share(row.get(f'PUBLISHER {p_idx}: Collection Performance Share %'))
             p_share_mr = format_share(row.get(f'PUBLISHER {p_idx}: Collection Mechanical Share %'))
             
+            # Chain Logic (2 digits)
+            chain_id = f"{p_idx:02d}"
+
             # SPU 1: Original
             spu = CwrLine("SPU")
             spu.write(3, f"{t_seq:08d}")
             spu.write(11, f"{rec_seq:08d}")
-            spu.write(19, f"{p_idx:02d}") # Chain ID
+            spu.write(19, chain_id) # Chain
             spu.write(21, f"00000000{p_idx}")
             spu.write(30, p_data['name'], 45)
             spu.write(76, "E") 
             spu.write(87, p_data['ipi'], 11, True)
-            spu.write(112, "021") 
+            spu.write(112, "021") # PR Soc
             spu.write(115, p_share_pr, 5)
-            spu.write(120, "021") 
+            spu.write(120, "021") # MR Soc
             spu.write(123, p_share_mr, 5)
-            spu.write(128, "   ") 
-            spu.write(131, "03300") 
+            spu.write(128, "   ") # SR Soc
+            spu.write(131, "03300") # SR Share
             spu.write(137, "N")
             spu.write(166, p_data['agreement'], 14)
             spu.write(180, "PG")
@@ -131,7 +134,7 @@ def generate_cwr_content(df):
             spu_l = CwrLine("SPU")
             spu_l.write(3, f"{t_seq:08d}")
             spu_l.write(11, f"{rec_seq:08d}")
-            spu_l.write(19, f"{p_idx:02d}") # Same Chain
+            spu_l.write(19, chain_id)
             spu_l.write(21, "000000012")
             spu_l.write(30, LUMINA_CONFIG['name'], 45)
             spu_l.write(76, "SE")
@@ -140,10 +143,10 @@ def generate_cwr_content(df):
             spu_l.write(115, "00000") 
             spu_l.write(120, "033") 
             spu_l.write(123, "00000") 
-            spu_l.write(128, "033") 
             
-            # FIX: Zero Share for Lumina SPU (Matches Official)
-            spu_l.write(131, "00000") 
+            # FIX: SR Soc '033' Hardcoded for Lumina (Matches Official Extract)
+            spu_l.write(128, "033") 
+            spu_l.write(131, "00000") # Zero Share
             
             spu_l.write(137, "N")
             spu_l.write(166, p_data['agreement'], 14)
@@ -157,15 +160,7 @@ def generate_cwr_content(df):
             spt.write(11, f"{rec_seq:08d}")
             spt.write(19, "000000012") 
             
-            # FIX: 6-Space Gap (Pos 28-33) - Writes start at 34? 
-            # Wait, Pos 28 (1-based) is Index 27?
-            # Standard SPT: Pub ID at 20 (Len 9) -> Ends 28. 
-            # Share 1 at 30 (Len 5)? 
-            # Let's trust the Geometry check from diff analysis:
-            # "Off: ...012      01650..." -> 6 spaces.
-            # ID ends at index 27 (start 19+8?). 000000012 is 9 chars.
-            # 19 + 9 = 28. 
-            # 28 + 6 spaces = 34.
+            # FIX: 6-Space Gap (Pos 28-33)
             spt.write(34, p_share_pr, 5)
             spt.write(39, p_share_mr, 5)
             spt.write(44, "03300")
@@ -178,4 +173,54 @@ def generate_cwr_content(df):
             pub_map[p_data['name']] = {"idx": p_idx, "agreement": p_data['agreement'], "orig": p_data}
 
         # --- WRITER LOOP ---
-        for w_idx in range(
+        for w_idx in range(1, 4):
+            w_last = row.get(f'WRITER {w_idx}: Last Name')
+            if pd.isna(w_last): continue
+            
+            w_first = row.get(f'WRITER {w_idx}: First Name', '')
+            w_ipi = row.get(f'WRITER {w_idx}: IPI')
+            w_pr = format_share(row.get(f'WRITER {w_idx}: Collection Performance Share %'))
+            
+            # SWR
+            swr = CwrLine("SWR")
+            swr.write(3, f"{t_seq:08d}")
+            swr.write(11, f"{rec_seq:08d}")
+            swr.write(19, f"00000000{w_idx}")
+            swr.write(28, w_last, 45)
+            swr.write(73, w_first, 30)
+            swr.write(104, "C ")
+            swr.write(115, w_ipi, 11, True)
+            swr.write(126, "021") 
+            swr.write(129, w_pr, 5)
+            swr.write(134, "099")
+            swr.write(137, "00000")
+            swr.write(142, "099")
+            swr.write(145, "00000")
+            
+            # FIX: Indicator at 151
+            swr.write(151, "N")
+            lines.append(str(swr))
+            rec_seq += 1
+            
+            # SWT
+            swt = CwrLine("SWT")
+            swt.write(3, f"{t_seq:08d}")
+            swt.write(11, f"{rec_seq:08d}")
+            swt.write(19, f"00000000{w_idx}")
+            swt.write(28, w_pr, 5)
+            swt.write(33, "00000")
+            swt.write(38, "00000")
+            swt.write(43, "I")
+            swt.write(44, "2136") 
+            swt.write(49, "001")
+            lines.append(str(swt))
+            rec_seq += 1
+            
+            # PWR
+            orig_pub_name = str(row.get(f'WRITER {w_idx}: Original Publisher')).upper()
+            linked = next((v for k, v in pub_map.items() if k in orig_pub_name), None)
+            
+            if linked:
+                pwr = CwrLine("PWR")
+                pwr.write(3, f"{t_seq:08d}")
+                pwr.write(11, f"{rec_seq:
