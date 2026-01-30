@@ -1,11 +1,198 @@
 import pandas as pd
 from datetime import datetime
 
-# --- CONFIGURATION ---
+# ==============================================================================
+# MODULE 1: THE BLUEPRINTS (GEOMETRY LAYER)
+# Defines EXACTLY where fields start and how long they are.
+# Based on your "Official CWR Extract.txt"
+# ==============================================================================
+
+class Blueprints:
+    # HDR: Header Record
+    HDR = [
+        (0,  3,  "HDR"),           # Record Type
+        (3,  11, "{sender_ipi}"),  # Sender IPI
+        (14, 45, "{sender_name}"), # Sender Name
+        (59, 5,  "01.10"),         # Version
+        (64, 8,  "{date}"),        # Creation Date
+        (72, 6,  "{time}"),        # Creation Time
+        (78, 8,  "{date}"),        # Transmission Date
+        (98, 8,  "BACKBEAT")       # Character Set
+    ]
+
+    # REV: Work Registration Record
+    REV = [
+        (0,   3,  "REV"),
+        (3,   8,  "{t_seq}"),      # Transaction Sequence
+        (11,  8,  "00000000"),     # Link
+        (19,  60, "{title}"),      # Work Title
+        (79,  2,  "  "),           # Gap (Adjusted for alignment)
+        (81,  14, "{work_id}"),    # Submitter Work ID
+        (95,  11, "{iswc}"),       # ISWC
+        (106, 8,  "00000000"),     # Date of Copyright
+        (126, 3,  "UNC"),          # Copyright Status
+        (129, 6,  "000025"),       # Duration
+        (135, 1,  "Y")             # Recorded Indicator
+    ]
+
+    # SPU: Publisher Record
+    SPU = [
+        (0,   3,  "SPU"),
+        (3,   8,  "{t_seq}"),
+        (11,  8,  "{rec_seq}"),
+        (19,  2,  "{chain_id}"),
+        (21,  9,  "{pub_id}"),
+        (30,  45, "{pub_name}"),
+        (76,  2,  "{role}"),       # E or SE
+        (87,  11, "{ipi}"),        # IPI Name #
+        (112, 3,  "{pr_soc}"),     # PR Society
+        (115, 5,  "{pr_share}"),   # PR Share
+        (120, 3,  "{mr_soc}"),     # MR Society
+        (123, 5,  "{mr_share}"),   # MR Share
+        (128, 3,  "{sr_soc}"),     # SR Society
+        (131, 5,  "{sr_share}"),   # SR Share
+        (137, 1,  "N"),            # Special Agreement
+        (166, 14, "{agreement}"),  # Society Assigned Agreement
+        (180, 2,  "PG")            # Agreement Type
+    ]
+
+    # SPT: Publisher Territory Record
+    SPT = [
+        (0,   3,  "SPT"),
+        (3,   8,  "{t_seq}"),
+        (11,  8,  "{rec_seq}"),
+        (19,  9,  "{pub_id}"),     # Publisher IP #
+        (28,  6,  "      "),       # GAP (Critical Fix)
+        (34,  5,  "{pr_share}"),
+        (39,  5,  "{mr_share}"),
+        (44,  5,  "{sr_share}"),
+        (49,  1,  "I"),            # Inclusion/Exclusion
+        (50,  4,  "{territory}"),  # Territory Code
+        (55,  3,  "001")           # Share Marker
+    ]
+
+    # SWR: Writer Record
+    SWR = [
+        (0,   3,  "SWR"),
+        (3,   8,  "{t_seq}"),
+        (11,  8,  "{rec_seq}"),
+        (19,  9,  "{writer_id}"),
+        (28,  45, "{last_name}"),
+        (73,  30, "{first_name}"),
+        (104, 2,  "C "),           # Capacity (Composer)
+        (115, 11, "{ipi}"),
+        (126, 3,  "{pr_soc}"),
+        (129, 5,  "{pr_share}"),
+        (134, 3,  "{mr_soc}"),
+        (137, 5,  "{mr_share}"),
+        (142, 3,  "{sr_soc}"),
+        (145, 5,  "{sr_share}"),
+        (151, 1,  "N")             # Indicator
+    ]
+
+    # SWT: Writer Territory Record
+    SWT = [
+        (0,   3,  "SWT"),
+        (3,   8,  "{t_seq}"),
+        (11,  8,  "{rec_seq}"),
+        (19,  9,  "{writer_id}"),
+        (28,  5,  "{pr_share}"),
+        (33,  5,  "{mr_share}"),
+        (38,  5,  "{sr_share}"),
+        (43,  1,  "I"),
+        (44,  4,  "2136"),         # World
+        (49,  3,  "001")
+    ]
+
+    # PWR: Publisher-Writer Link Record
+    PWR = [
+        (0,   3,  "PWR"),
+        (3,   8,  "{t_seq}"),
+        (11,  8,  "{rec_seq}"),
+        (19,  2,  "{chain_id}"),   # Restored Chain ID
+        (21,  9,  "{pub_id}"),
+        (28,  45, "{pub_name}"),
+        (87,  14, "{agreement}"),
+        (101, 11, "{writer_ref}")  # 000000 + Writer + Pub
+    ]
+
+    # REC: Recording Record
+    REC = [
+        (0,   3,  "REC"),
+        (3,   8,  "{t_seq}"),
+        (11,  8,  "{rec_seq}"),
+        (19,  8,  "00000000"),     # Date (Blank)
+        (74,  6,  "000000"),       # Duration
+        (154, 14, "{cd_id}"),
+        (180, 12, "{isrc}"),
+        (194, 2,  "{source}"),     # CD or DW
+        (197, 60, "{title}"),      # Title (For DW)
+        (297, 60, "{label}"),      # Label (For CD)
+        (349, 1,  "Y")
+    ]
+
+    # ORN: Origin Record
+    ORN = [
+        (0,   3,  "ORN"),
+        (3,   8,  "{t_seq}"),
+        (11,  8,  "{rec_seq}"),
+        (19,  3,  "LIB"),
+        (22,  60, "{library}"),
+        (82,  14, "{cd_id}"),
+        (96,  4,  "0001"),
+        (100, 60, "{label}")
+    ]
+
+# ==============================================================================
+# MODULE 2: THE ASSEMBLER (EXECUTION LAYER)
+# Dumb engine that takes blueprints and data, and builds lines.
+# ==============================================================================
+
+class Assembler:
+    def __init__(self):
+        self.buffer = [' '] * 512
+
+    def build(self, blueprint, data_dict):
+        """
+        Takes a blueprint list and a data dictionary.
+        Injects data into the buffer at specific coordinates.
+        """
+        self.buffer = [' '] * 512 # Reset buffer
+        
+        for start, length, value_template in blueprint:
+            # 1. Resolve Value (Handle placeholders like {title})
+            if value_template.startswith("{") and value_template.endswith("}"):
+                key = value_template[1:-1]
+                val = str(data_dict.get(key, ""))
+            else:
+                val = value_template
+            
+            # 2. Format Value (Upper, Strip)
+            val = val.strip().upper()
+            
+            # 3. Handle Numeric Padding (if it looks like a number string)
+            # Simple heuristic: If it needs to fill a specific ID slot, zero-pad it.
+            # But standard text is space-padded.
+            # We rely on the Data Layer to pre-format numbers (e.g. "00001").
+            
+            # 4. Truncate/Pad
+            val = val.ljust(length)[:length]
+            
+            # 5. Write to Buffer
+            for i, char in enumerate(val):
+                if start + i < 512:
+                    self.buffer[start + i] = char
+                    
+        return "".join(self.buffer).rstrip()
+
+# ==============================================================================
+# MODULE 3: THE DATA LOGIC (BUSINESS LAYER)
+# Extracts and cleans data from the CSV.
+# ==============================================================================
+
 LUMINA_CONFIG = {
     "name": "LUMINA PUBLISHING UK",
     "ipi": "01254514077",
-    "role": "SE",
     "territory": "0826"
 }
 
@@ -16,64 +203,39 @@ PUBLISHER_DB = {
     "SNOOPLE": {"name": "SNOOPLE SONGS", "ipi": "00610526488", "agreement": "13990221"}
 }
 
-# --- CWR ASSEMBLER ---
-class CwrLine:
-    def __init__(self, record_type):
-        self.buffer = [' '] * 512 
-        self.write(0, record_type)
-        
-    def write(self, start, val, length=None, is_num=False):
-        if pd.isna(val): val = ""
-        s_val = str(val).strip().upper()
-        if is_num:
-            if s_val.endswith('.0'): s_val = s_val[:-2]
-            s_val = ''.join(filter(str.isdigit, s_val))
-            formatted = s_val.zfill(length) if length else s_val
-        else:
-            formatted = s_val.ljust(length) if length else s_val
-            
-        if length: formatted = formatted[:length]
-        
-        for i, char in enumerate(formatted):
-            if start + i < len(self.buffer):
-                self.buffer[start + i] = char
-    
-    def __str__(self):
-        return "".join(self.buffer).rstrip()
-
-def format_share(val):
+def fmt_share(val):
     try:
         if pd.isna(val) or str(val).strip() == '': return "00000"
         return f"{int(round(float(val) * 100)):05d}"
     except: return "00000"
 
-def get_pub_data(raw_name):
+def get_pub(raw_name):
     raw = str(raw_name).upper()
     for key, data in PUBLISHER_DB.items():
         if key in raw: return data
     return {"name": raw_name[:45], "ipi": "00000000000", "agreement": "00000000"}
 
-# --- GENERATION LOGIC ---
 def generate_cwr_content(df):
     lines = []
-    now_d = datetime.now().strftime("%Y%m%d")
-    now_t = datetime.now().strftime("%H%M%S")
+    asm = Assembler()
     
-    # HDR
-    hdr = CwrLine("HDR")
-    hdr.write(3, LUMINA_CONFIG['ipi'], 11, True)
-    hdr.write(14, LUMINA_CONFIG['name'], 45)
-    hdr.write(59, "01.10")
-    hdr.write(64, now_d)
-    hdr.write(72, now_t)
-    hdr.write(78, now_d)
-    hdr.write(98, "BACKBEAT") 
-    lines.append(str(hdr))
+    # Global Data
+    now = datetime.now()
+    global_ctx = {
+        "date": now.strftime("%Y%m%d"),
+        "time": now.strftime("%H%M%S"),
+        "sender_ipi": LUMINA_CONFIG["ipi"],
+        "sender_name": LUMINA_CONFIG["name"]
+    }
+    
+    # 1. HEADER
+    lines.append(asm.build(Blueprints.HDR, global_ctx))
     lines.append("GRHREV0000102.200000000001")
 
+    # 2. TRANSACTIONS
     for i, row in df.iterrows():
-        t_seq = i 
-        t_seq_str = f"{t_seq:08d}"
+        # --- PREPARE ROW DATA ---
+        t_seq = f"{i:08d}"
         
         # ID Logic
         raw_id = row.get('Song_Number')
@@ -82,219 +244,171 @@ def generate_cwr_content(df):
             track_num = int(row.get('TRACK: Number', 0))
             raw_id = f"{track_num:07d}"
         
-        submitter_id = raw_id
-        title = row.get('TRACK: Title', 'UNKNOWN TITLE')
-        iswc = row.get('CODE: ISWC', '')
+        ctx = {
+            "t_seq": t_seq,
+            "title": row.get('TRACK: Title', 'UNKNOWN TITLE'),
+            "work_id": raw_id,
+            "iswc": row.get('CODE: ISWC', ''),
+            "cd_id": row.get('ALBUM: Code', 'RC052'),
+            "isrc": row.get('CODE: ISRC', ''),
+            "library": "RED COLA", # Or from CSV
+            "label": "RED COLA"
+        }
         
-        # REV
-        rev = CwrLine("REV")
-        rev.write(3, t_seq_str)
-        rev.write(11, "00000000")
-        rev.write(19, title, 60)
-        rev.write(81, submitter_id, 14)
-        rev.write(95, iswc, 11)
-        rev.write(106, "00000000") 
-        rev.write(126, "UNC")
-        rev.write(129, "000025") 
-        rev.write(135, "Y")
-        lines.append(str(rev))
-
+        # REV Record
+        lines.append(asm.build(Blueprints.REV, ctx))
+        
         rec_seq = 1
-        pub_map = {}
+        pub_map = {} # Maps Name -> {idx, agreement, orig_data}
 
-        # --- PUBLISHER LOOP ---
+        # --- PUBLISHERS ---
         for p_idx in range(1, 4):
             p_name = row.get(f'PUBLISHER {p_idx}: Name')
             if pd.isna(p_name): continue
             
-            p_data = get_pub_data(p_name)
-            p_share_pr = format_share(row.get(f'PUBLISHER {p_idx}: Collection Performance Share %'))
-            p_share_mr = format_share(row.get(f'PUBLISHER {p_idx}: Collection Mechanical Share %'))
+            p_data = get_pub(p_name)
+            p_shares = {
+                "pr": fmt_share(row.get(f'PUBLISHER {p_idx}: Collection Performance Share %')),
+                "mr": fmt_share(row.get(f'PUBLISHER {p_idx}: Collection Mechanical Share %'))
+            }
             
-            # Formatted Strings for SPU
-            rec_seq_str = f"{rec_seq:08d}"
-            chain_id = f"{p_idx:02d}"
-            pub_num = f"00000000{p_idx}"
-
             # SPU 1: Original
-            spu = CwrLine("SPU")
-            spu.write(3, t_seq_str)
-            spu.write(11, rec_seq_str)
-            spu.write(19, chain_id)
-            spu.write(21, pub_num)
-            spu.write(30, p_data['name'], 45)
-            spu.write(76, "E") 
-            spu.write(87, p_data['ipi'], 11, True)
-            spu.write(112, "021") 
-            spu.write(115, p_share_pr, 5)
-            spu.write(120, "021") 
-            spu.write(123, p_share_mr, 5)
-            spu.write(128, "   ") 
-            spu.write(131, "03300") 
-            spu.write(137, "N")
-            spu.write(166, p_data['agreement'], 14)
-            spu.write(180, "PG")
-            lines.append(str(spu))
+            ctx_spu = {
+                "t_seq": t_seq,
+                "rec_seq": f"{rec_seq:08d}",
+                "chain_id": f"{p_idx:02d}",
+                "pub_id": f"00000000{p_idx}",
+                "pub_name": p_data['name'],
+                "role": "E ",
+                "ipi": p_data['ipi'],
+                "pr_soc": "021", "pr_share": p_shares['pr'],
+                "mr_soc": "021", "mr_share": p_shares['mr'],
+                "sr_soc": "   ", "sr_share": "03300",
+                "agreement": p_data['agreement']
+            }
+            lines.append(asm.build(Blueprints.SPU, ctx_spu))
             rec_seq += 1
             
             # SPU 2: Lumina
-            rec_seq_str = f"{rec_seq:08d}"
-            spu_l = CwrLine("SPU")
-            spu_l.write(3, t_seq_str)
-            spu_l.write(11, rec_seq_str)
-            spu_l.write(19, chain_id)
-            spu_l.write(21, "000000012")
-            spu_l.write(30, LUMINA_CONFIG['name'], 45)
-            spu_l.write(76, "SE")
-            spu_l.write(87, LUMINA_CONFIG['ipi'], 11, True)
-            spu_l.write(112, "052") 
-            spu_l.write(115, "00000") 
-            spu_l.write(120, "033") 
-            spu_l.write(123, "00000") 
-            spu_l.write(128, "033") 
-            spu_l.write(131, "00000") # Zero Share
-            spu_l.write(137, "N")
-            spu_l.write(166, p_data['agreement'], 14)
-            spu_l.write(180, "PG")
-            lines.append(str(spu_l))
+            ctx_lum = ctx_spu.copy()
+            ctx_lum.update({
+                "rec_seq": f"{rec_seq:08d}",
+                "pub_id": "000000012",
+                "pub_name": LUMINA_CONFIG['name'],
+                "role": "SE",
+                "ipi": LUMINA_CONFIG['ipi'],
+                "pr_soc": "052", "pr_share": "00000",
+                "mr_soc": "033", "mr_share": "00000",
+                "sr_soc": "033", "sr_share": "00000" # Fixed Zero Share
+            })
+            lines.append(asm.build(Blueprints.SPU, ctx_lum))
             rec_seq += 1
             
             # SPT
-            rec_seq_str = f"{rec_seq:08d}"
-            spt = CwrLine("SPT")
-            spt.write(3, t_seq_str)
-            spt.write(11, rec_seq_str)
-            spt.write(19, "000000012") 
-            # 6-Space Gap at 28
-            spt.write(34, p_share_pr, 5)
-            spt.write(39, p_share_mr, 5)
-            spt.write(44, "03300")
-            spt.write(49, "I")
-            spt.write(50, LUMINA_CONFIG['territory'])
-            spt.write(55, "001")
-            lines.append(str(spt))
+            ctx_spt = {
+                "t_seq": t_seq,
+                "rec_seq": f"{rec_seq:08d}",
+                "pub_id": "000000012",
+                "pr_share": p_shares['pr'],
+                "mr_share": p_shares['mr'],
+                "sr_share": "03300",
+                "territory": LUMINA_CONFIG['territory']
+            }
+            lines.append(asm.build(Blueprints.SPT, ctx_spt))
             rec_seq += 1
             
-            pub_map[p_data['name']] = {
-                "idx": p_idx, 
-                "agreement": p_data['agreement'], 
-                "orig": p_data
-            }
+            pub_map[p_data['name']] = {"idx": p_idx, "agreement": p_data['agreement'], "orig": p_data}
 
-        # --- WRITER LOOP ---
+        # --- WRITERS ---
         for w_idx in range(1, 4):
             w_last = row.get(f'WRITER {w_idx}: Last Name')
             if pd.isna(w_last): continue
             
-            w_first = row.get(f'WRITER {w_idx}: First Name', '')
-            w_ipi = row.get(f'WRITER {w_idx}: IPI')
-            w_pr = format_share(row.get(f'WRITER {w_idx}: Collection Performance Share %'))
+            w_shares = fmt_share(row.get(f'WRITER {w_idx}: Collection Performance Share %'))
             
-            rec_seq_str = f"{rec_seq:08d}"
-            writer_id = f"00000000{w_idx}"
-
-            # SWR
-            swr = CwrLine("SWR")
-            swr.write(3, t_seq_str)
-            swr.write(11, rec_seq_str)
-            swr.write(19, writer_id)
-            swr.write(28, w_last, 45)
-            swr.write(73, w_first, 30)
-            swr.write(104, "C ")
-            swr.write(115, w_ipi, 11, True)
-            swr.write(126, "021") 
-            swr.write(129, w_pr, 5)
-            swr.write(134, "099")
-            swr.write(137, "00000")
-            swr.write(142, "099")
-            swr.write(145, "00000")
-            swr.write(151, "N")
-            lines.append(str(swr))
+            ctx_swr = {
+                "t_seq": t_seq,
+                "rec_seq": f"{rec_seq:08d}",
+                "writer_id": f"00000000{w_idx}",
+                "last_name": w_last,
+                "first_name": row.get(f'WRITER {w_idx}: First Name', ''),
+                "ipi": row.get(f'WRITER {w_idx}: IPI', ''),
+                "pr_soc": "021", "pr_share": w_shares,
+                "mr_soc": "099", "mr_share": "00000",
+                "sr_soc": "099", "sr_share": "00000"
+            }
+            lines.append(asm.build(Blueprints.SWR, ctx_swr))
             rec_seq += 1
             
             # SWT
-            rec_seq_str = f"{rec_seq:08d}"
-            swt = CwrLine("SWT")
-            swt.write(3, t_seq_str)
-            swt.write(11, rec_seq_str)
-            swt.write(19, writer_id)
-            swt.write(28, w_pr, 5)
-            swt.write(33, "00000")
-            swt.write(38, "00000")
-            swt.write(43, "I")
-            swt.write(44, "2136") 
-            swt.write(49, "001")
-            lines.append(str(swt))
+            ctx_swt = {
+                "t_seq": t_seq,
+                "rec_seq": f"{rec_seq:08d}",
+                "writer_id": f"00000000{w_idx}",
+                "pr_share": w_shares,
+                "mr_share": "00000",
+                "sr_share": "00000"
+            }
+            lines.append(asm.build(Blueprints.SWT, ctx_swt))
             rec_seq += 1
             
             # PWR
-            orig_pub_name = str(row.get(f'WRITER {w_idx}: Original Publisher')).upper()
-            linked = next((v for k, v in pub_map.items() if k in orig_pub_name), None)
+            orig_pub = str(row.get(f'WRITER {w_idx}: Original Publisher')).upper()
+            linked = next((v for k, v in pub_map.items() if k in orig_pub), None)
             
             if linked:
-                rec_seq_str = f"{rec_seq:08d}"
-                pub_ref_id = f"00000000{linked['idx']}"
-                # Writer Ref: 000000 + WriterNum + PubNum
-                writer_ref = f"000000{w_idx:03d}{linked['idx']:02d}"
-
-                pwr = CwrLine("PWR")
-                pwr.write(3, t_seq_str)
-                pwr.write(11, rec_seq_str)
-                pwr.write(19, "00") # Chain 00
-                pwr.write(21, pub_ref_id) 
-                pwr.write(28, linked['orig']['name'], 45)
-                pwr.write(87, linked['agreement'], 14)
-                pwr.write(101, writer_ref) 
-                
-                lines.append(str(pwr))
+                ctx_pwr = {
+                    "t_seq": t_seq,
+                    "rec_seq": f"{rec_seq:08d}",
+                    "chain_id": "00",
+                    "pub_id": f"00000000{linked['idx']}",
+                    "pub_name": linked['orig']['name'],
+                    "agreement": linked['agreement'],
+                    "writer_ref": f"000000{w_idx:03d}{linked['idx']:02d}"
+                }
+                lines.append(asm.build(Blueprints.PWR, ctx_pwr))
                 rec_seq += 1
 
-        # RECORDS & ORIGIN
-        cd_id_raw = row.get('ALBUM: Code', 'RC052')
-        
-        # REC 1: Audio
-        rec_seq_str = f"{rec_seq:08d}"
-        rec = CwrLine("REC")
-        rec.write(3, t_seq_str)
-        rec.write(11, rec_seq_str)
-        rec.write(19, "00000000")
-        rec.write(74, "000000")
-        rec.write(154, cd_id_raw, 14)
-        rec.write(180, isrc, 12)
-        rec.write(194, "CD")
-        rec.write(297, "RED COLA")
-        rec.write(349, "Y")
-        lines.append(str(rec))
-        rec_seq += 1
-
-        # REC 2: Digital
-        rec_seq_str = f"{rec_seq:08d}"
-        rec2 = CwrLine("REC")
-        rec2.write(3, t_seq_str)
-        rec2.write(11, rec_seq_str)
-        rec2.write(19, "00000000")
-        rec2.write(74, "000000")
-        rec2.write(180, isrc, 12)
-        rec2.write(194, "DW")
-        rec2.write(197, title, 60)
-        rec2.write(349, "Y")
-        lines.append(str(rec2))
+        # --- ARTIFACTS ---
+        # REC 1 (CD)
+        ctx_rec_cd = {
+            "t_seq": t_seq,
+            "rec_seq": f"{rec_seq:08d}",
+            "cd_id": ctx['cd_id'],
+            "isrc": ctx['isrc'],
+            "source": "CD",
+            "label": "RED COLA"
+        }
+        lines.append(asm.build(Blueprints.REC, ctx_rec_cd))
         rec_seq += 1
         
-        orn = CwrLine("ORN")
-        orn.write(3, t_seq_str)
-        orn.write(11, f"{rec_seq:08d}")
-        orn.write(19, "LIB")
-        orn.write(22, row.get('ALBUM: Title', 'UNKNOWN'), 60)
-        orn.write(82, cd_id_raw, 14)
-        orn.write(96, "0001")
-        orn.write(100, "RED COLA")
-        lines.append(str(orn))
+        # REC 2 (DW)
+        ctx_rec_dw = {
+            "t_seq": t_seq,
+            "rec_seq": f"{rec_seq:08d}",
+            "cd_id": "", # Blank for DW
+            "isrc": ctx['isrc'],
+            "source": "DW",
+            "title": ctx['title']
+        }
+        lines.append(asm.build(Blueprints.REC, ctx_rec_dw))
+        rec_seq += 1
+        
+        # ORN
+        ctx_orn = {
+            "t_seq": t_seq,
+            "rec_seq": f"{rec_seq:08d}",
+            "library": ctx['title'], # ORN Title often matches Track or Album? Using Track for now based on context
+            "cd_id": ctx['cd_id'],
+            "label": "RED COLA"
+        }
+        # Update ORN Logic: Parity showed "LIB" + Album Title. Let's fix that.
+        ctx_orn["library"] = row.get('ALBUM: Title', 'UNKNOWN').upper()
+        lines.append(asm.build(Blueprints.ORN, ctx_orn))
 
     # TRAILERS
     count_df = len(df)
     count_lines = len(lines) + 2
-    
     lines.append(f"GRT00001{count_df:08d}{count_lines:08d}")
     lines.append(f"TRL00001{count_df:08d}{count_lines:08d}")
     
