@@ -35,9 +35,9 @@ SCHEMA = {
         (101, 11, "X", "Writer Reference", False) # Ends around 112
     ],
     "TRL": [
-        # FIXED: Offsets adjusted for 5-digit Group ID
+        # FIXED: Offsets adjusted for 5-digit Group ID (ICE format)
         (0, 3, "A", "Record Type", True),
-        (8, 8, "N", "Transaction Count", True), # Starts at 8 (TRL + 5 digit Group)
+        (8, 8, "N", "Transaction Count", True), # Starts at 8
         (16, 8, "N", "Record Count", True),     # Starts at 16
     ]
 }
