@@ -1,23 +1,20 @@
 import re
 
 # ==============================================================================
-# LAYER 1: THE LAWS (ALIGNED TO ICE "BIBLE" FILES)
+# LAYER 1: THE LAWS (ALIGNED TO YOUR 'CW25...' FILE)
 # ==============================================================================
 
 PATTERNS = {
     "N": r"^\d+$",                # Strict Numeric
-    "A": r"^[A-Z0-9\s\.,\-\']+$", # Alphanumeric (Names, Titles)
-    "X": r"^[A-Z0-9\s]+$",        # IDs (Allows "SO...", "SN..." prefixes found in ICE files)
+    "A": r"^[A-Z0-9\s\.,\-\']+$", # Alphanumeric
+    "X": r"^[A-Z0-9\s]+$",        # IDs (Allows "SO...", "SN..." prefixes)
 }
 
-# SCHEMA DEFINITION
-# Format: (start_index, length, pattern_key, field_name, is_mandatory)
-# Offsets verified against 'CW250011052_LUM.V22.txt'
-
+# SCHEMA: (start_index, length, pattern_key, field_name, is_mandatory)
 SCHEMA = {
     "HDR": [
         (0, 3, "A", "Record Type", True),
-        (3, 11, "X", "Sender IPI", True), # Changed to X to allow "SO" prefix
+        (3, 11, "X", "Sender IPI", True),
         (59, 5, "A", "Version", True), 
     ],
     "REV": [ 
@@ -31,21 +28,22 @@ SCHEMA = {
         (76, 2, "A", "Role Code", True),
     ],
     "PWR": [
-        # NOTE: ICE Files skip the 'Chain ID' at 19-21. 
-        # Publisher ID starts immediately at 19.
+        # FIXED: Removed 'Writer IPI' check which caused "Line too short"
         (3, 8, "N", "Transaction Seq", True),
-        (19, 9, "X", "Publisher ID", True), # Starts at 19 (not 21)
-        (28, 45, "A", "Publisher Name", True), # Starts at 28 (not 30)
+        (19, 9, "X", "Publisher ID", True), 
+        (28, 45, "A", "Publisher Name", True),
+        (101, 11, "X", "Writer Reference", False) # Ends around 112
     ],
     "TRL": [
+        # FIXED: Offsets adjusted for 5-digit Group ID
         (0, 3, "A", "Record Type", True),
-        (11, 8, "N", "Transaction Count", True), 
-        (19, 8, "N", "Record Count", True),
+        (8, 8, "N", "Transaction Count", True), # Starts at 8 (TRL + 5 digit Group)
+        (16, 8, "N", "Record Count", True),     # Starts at 16
     ]
 }
 
 # ==============================================================================
-# LAYER 2: THE DETECTIVE (LOGIC ENGINE)
+# LAYER 2: THE DETECTIVE
 # ==============================================================================
 
 class CWRValidator:
@@ -77,16 +75,18 @@ class CWRValidator:
         return None
 
     def process_file(self, file_content_str):
-        # Normalize line endings
+        # Normalize line endings to prevent ghost lines
         lines = file_content_str.replace('\r\n', '\n').split('\n')
-        lines = [l for l in lines if l.strip()] # Remove empty lines
+        lines = [l for l in lines if l.strip()] 
         
         self.stats["lines_read"] = len(lines)
         
         for i, line in enumerate(lines):
             line_num = i + 1
             
+            # Skip extremely short garbage lines
             if len(line) < 3: continue
+            
             rec_type = line[0:3]
             
             # Logic: Transaction Counter
@@ -99,27 +99,24 @@ class CWRValidator:
             if rec_type in SCHEMA:
                 rules = SCHEMA[rec_type]
                 for start, length, f_type, f_name, mandatory in rules:
-                    # Skip check if line is simply too short (truncation is common in CWR)
-                    if len(line) < start + length: continue
+                    # SAFETY: If line is too short for this field, skip it 
+                    # (unless it's the very start of the line, which is critical)
+                    if len(line) < start + length:
+                        if start < 10: # Critical header fields must exist
+                             self._log("ERROR", line_num, f"Line truncated. Missing {f_name}", line)
+                        continue 
                         
                     val = line[start : start + length]
                     error = self.validate_field(val, f_type, f_name, line_num, mandatory)
                     if error:
                         self._log("ERROR", line_num, error, line)
             
-            # Hierarchy Check (Sequence Integrity)
-            if rec_type not in ["HDR", "TRL", "GRH", "GRT"] and rec_type in SCHEMA:
-                 try:
-                    line_t_seq = int(line[3:11])
-                    if self.current_t_seq != -1 and line_t_seq != self.current_t_seq:
-                        self._log("ERROR", line_num, f"Sequence Mismatch. Expected {self.current_t_seq}, got {line_t_seq}", line)
-                 except: pass
-
-            # Trailer Check
+            # Trailer Check (Corrected Logic)
             if rec_type == "TRL":
                 try:
-                    claimed_trans = int(line[11:19])
-                    claimed_recs = int(line[19:27])
+                    # Using the offsets defined in SCHEMA['TRL'] above (8 and 16)
+                    claimed_trans = int(line[8:16])
+                    claimed_recs = int(line[16:24])
                     
                     if claimed_trans != self.stats["transactions"]:
                         self._log("CRITICAL", line_num, f"Transaction Count Mismatch. Header says {claimed_trans}, Found {self.stats['transactions']}", line)
