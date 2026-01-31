@@ -1,6 +1,13 @@
 import pandas as pd
 from datetime import datetime
 
+# Import Configuration with Fallback
+try:
+    from mapping_config import LUMINA_CONFIG, PUBLISHER_DB
+except ImportError:
+    LUMINA_CONFIG = {"name": "ERROR", "ipi": "00000000000", "territory": "0000"}
+    PUBLISHER_DB = {}
+
 # ==============================================================================
 # MODULE 1: THE BLUEPRINTS (GEOMETRY LAYER)
 # ==============================================================================
@@ -171,8 +178,6 @@ class Assembler:
 # ==============================================================================
 # MODULE 3: THE DATA LOGIC (BUSINESS LAYER)
 # ==============================================================================
-
-from mapping_config import LUMINA_CONFIG, PUBLISHER_DB
 
 def fmt_share(val):
     try:
