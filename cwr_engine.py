@@ -1,32 +1,44 @@
 import pandas as pd
 from datetime import datetime
+import re
 
 # ==============================================================================
-# CONFIGURATION (Hardcoded Fallback for Safety)
+# CONFIGURATION: THE "VESNA RULES"
 # ==============================================================================
+
+FIXED_PUB_IDS = {
+    "TARMAC": "000000001",
+    "PASHALINA": "000000006",
+    "LUKACINO": "000000008",
+    "SNOOPLE": "000000009",
+    "LUMINA": "000000012",
+    "MANNY": "000000013"
+}
+
+FIXED_WRITER_IDS = {
+    "WHEELER": "000000001",
+    "PRICE": "000000002",
+    "FAZIO": "000000028"
+}
+
+AGREEMENT_MAP = {
+    "TARMAC": "6781310",
+    "PASHALINA": "4316161",
+    "LUKACINO": "3845006",
+    "SNOOPLE": "13990221",
+    "MANNY": "13997451"
+}
+
 try:
-    from mapping_config import LUMINA_CONFIG, PUBLISHER_DB
+    from mapping_config import LUMINA_CONFIG
 except ImportError:
-    # Fallback if file missing
-    LUMINA_CONFIG = {
-        "name": "LUMINA PUBLISHING UK",
-        "ipi": "01254514077",
-        "territory": "0826"
-    }
-    PUBLISHER_DB = {
-        # Common mappings we've seen in your files
-        "TARMAC": {"name": "TARMAC 1331 PUBLISHING", "ipi": "00356296239", "agreement": "6781310"},
-        "PASHALINA": {"name": "PASHALINA PUBLISHING", "ipi": "00498578867", "agreement": "4316161"},
-        "MANNY": {"name": "MANNY G MUSIC", "ipi": "00515125979", "agreement": "13997451"},
-        "SNOOPLE": {"name": "SNOOPLE SONGS", "ipi": "00610526488", "agreement": "13990221"}
-    }
+    LUMINA_CONFIG = {"name": "LUMINA PUBLISHING UK", "ipi": "01254514077", "territory": "0826"}
 
 # ==============================================================================
-# MODULE 1: THE BLUEPRINTS (ICE/VESNA ALIGNED)
+# BLUEPRINTS (Geometry)
 # ==============================================================================
 
 class Blueprints:
-    # HDR: Header Record (Refined for Version 2.2 Tag)
     HDR = [
         (0,  3,  "HDR"),           
         (3,  11, "{sender_ipi}"),  
@@ -35,11 +47,10 @@ class Blueprints:
         (64, 8,  "{date}"),        
         (72, 6,  "{time}"),        
         (78, 8,  "{date}"),        
-        (85, 4,  "2.20"),          # ICE specific version tag
+        (85, 4,  "2.20"),          
         (98, 8,  "BACKBEAT")       
     ]
 
-    # REV: Aligned to ORI (Original) type found in Bible
     REV = [
         (0,   3,  "REV"),
         (3,   8,  "{t_seq}"),      
@@ -49,13 +60,31 @@ class Blueprints:
         (81,  14, "{work_id}"),    
         (95,  11, "{iswc}"),       
         (106, 8,  "00000000"),     
-        (126, 3,  "UNC"),          
-        (129, 6,  "000025"),       
-        (135, 1,  "Y"),
-        (136, 3,  "ORI")           # Added Work Type flag
+        (126, 3,  "{duration}"),   # DYNAMIC
+        (129, 6,  "000025"),       # Fallback / Padding if needed (Overwritten by duration logic usually)
+        (135, 1,  "Y"),            
+        (136, 6,  "      "),       # The "Vesna Gap"
+        (142, 3,  "ORI")           # Work Type
     ]
 
-    # SPU: Publisher Record
+    # Adjusted REV blueprint to ensure duration sits at 126 and overwrites defaults
+    REV_DYNAMIC = [
+        (0,   3,  "REV"),
+        (3,   8,  "{t_seq}"),      
+        (11,  8,  "00000000"),     
+        (19,  60, "{title}"),      
+        (79,  2,  "  "),           
+        (81,  14, "{work_id}"),    
+        (95,  11, "{iswc}"),       
+        (106, 8,  "00000000"),     
+        (114, 12, "            "), # Empty Space
+        (126, 3,  "UNC"),          # Duration Type
+        (129, 6,  "{duration}"),   # HHMMSS
+        (135, 1,  "Y"),            
+        (136, 6,  "      "),       
+        (142, 3,  "ORI")           
+    ]
+
     SPU = [
         (0,   3,  "SPU"),
         (3,   8,  "{t_seq}"),
@@ -76,7 +105,6 @@ class Blueprints:
         (180, 2,  "PG")            
     ]
 
-    # SPT: Territory
     SPT = [
         (0,   3,  "SPT"),
         (3,   8,  "{t_seq}"),
@@ -90,7 +118,6 @@ class Blueprints:
         (55,  3,  "001")           
     ]
 
-    # SWR: Writer
     SWR = [
         (0,   3,  "SWR"),
         (3,   8,  "{t_seq}"),
@@ -109,7 +136,6 @@ class Blueprints:
         (151, 1,  "N")             
     ]
 
-    # SWT: Writer Territory
     SWT = [
         (0,   3,  "SWT"),
         (3,   8,  "{t_seq}"),
@@ -123,7 +149,6 @@ class Blueprints:
         (49,  3,  "001")
     ]
 
-    # PWR: Aligned to Bible Spacing
     PWR = [
         (0,   3,  "PWR"),
         (3,   8,  "{t_seq}"),
@@ -134,7 +159,6 @@ class Blueprints:
         (101, 11, "{writer_ref}")  
     ]
 
-    # REC & ORN (preserves existing logic)
     REC = [
         (0,   3,  "REC"),
         (3,   8,  "{t_seq}"),
@@ -159,10 +183,6 @@ class Blueprints:
         (100, 60, "{label}")
     ]
 
-# ==============================================================================
-# MODULE 2: ASSEMBLER
-# ==============================================================================
-
 class Assembler:
     def __init__(self):
         self.buffer = [' '] * 512
@@ -183,7 +203,7 @@ class Assembler:
         return "".join(self.buffer).rstrip()
 
 # ==============================================================================
-# MODULE 3: GENERATION LOGIC
+# LOGIC ENGINE
 # ==============================================================================
 
 def fmt_share(val):
@@ -192,24 +212,47 @@ def fmt_share(val):
         return f"{int(round(float(val) * 100)):05d}"
     except: return "00000"
 
-def get_pub(raw_name):
-    raw = str(raw_name).upper()
-    # Simple fuzzy match
-    for key, data in PUBLISHER_DB.items():
-        if key in raw: return data
-    # Generic Fallback
-    return {"name": raw_name[:45], "ipi": "00000000000", "agreement": "00000000"}
+def parse_duration(val):
+    """Converts '2:35' or '155' (seconds) to '000235' (HHMMSS)"""
+    if pd.isna(val) or str(val).strip() == '':
+        return "000000"
+    
+    val_str = str(val).strip()
+    
+    # Check if colons exist (MM:SS)
+    if ':' in val_str:
+        parts = val_str.split(':')
+        if len(parts) == 2: # MM:SS
+            m, s = int(parts[0]), int(parts[1])
+            h = 0
+        elif len(parts) == 3: # HH:MM:SS
+            h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
+        else:
+            return "000000"
+    else:
+        # Assume Seconds
+        try:
+            total_seconds = int(float(val_str))
+            h = total_seconds // 3600
+            m = (total_seconds % 3600) // 60
+            s = total_seconds % 60
+        except:
+            return "000000"
+
+    return f"{h:02d}{m:02d}{s:02d}"
 
 def get_col(row, base_name, idx, suffix):
-    """Smart column selector: tries 'NAME 1: Suffix' AND 'NAME:1: Suffix'"""
-    # Try Format A: "WRITER 1: Last Name"
     val = row.get(f'{base_name} {idx}: {suffix}')
     if not pd.isna(val): return val
-    
-    # Try Format B: "WRITER:1: Last Name" (Harvest Style)
     val = row.get(f'{base_name}:{idx}: {suffix}')
     if not pd.isna(val): return val
-    
+    return None
+
+def lookup_id(name, type_dict):
+    upper_name = str(name).upper()
+    for key, fixed_id in type_dict.items():
+        if key in upper_name:
+            return fixed_id
     return None
 
 def generate_cwr_content(df):
@@ -226,10 +269,13 @@ def generate_cwr_content(df):
     lines.append(asm.build(Blueprints.HDR, global_ctx))
     lines.append("GRHREV0000102.200000000001")
 
+    unknown_pub_counter = 90
+    unknown_writer_counter = 90
+    
     for i, row in df.iterrows():
         t_seq = f"{i:08d}"
         
-        # ID Logic
+        # --- REV DATA ---
         raw_id = row.get('Song_Number')
         if pd.isna(raw_id): raw_id = row.get('CODE: Song Code')
         if pd.isna(raw_id): 
@@ -242,129 +288,181 @@ def generate_cwr_content(df):
         cd_id_val = str(row.get('ALBUM: Code', 'RC055'))
         album_title_val = str(row.get('ALBUM: Title', 'ALBUM'))
         
+        # DYNAMIC DURATION
+        dur_raw = row.get('TRACK: Duration', '0')
+        dur_cwr = parse_duration(dur_raw)
+        
         ctx = {
-            "t_seq": t_seq,
-            "title": title_val,
-            "work_id": str(raw_id),
-            "iswc": iswc_val,
-            "cd_id": cd_id_val,
-            "isrc": isrc_val,
-            "library": album_title_val.upper(),
-            "label": "RED COLA"
+            "t_seq": t_seq, "title": title_val, "work_id": str(raw_id),
+            "iswc": iswc_val, "cd_id": cd_id_val, "isrc": isrc_val,
+            "library": album_title_val.upper(), "label": "RED COLA",
+            "duration": dur_cwr
         }
-        
-        lines.append(asm.build(Blueprints.REV, ctx))
-        
+        lines.append(asm.build(Blueprints.REV_DYNAMIC, ctx))
         rec_seq = 1
-        pub_map = {} 
         
-        # --- WRITER LOOP ---
-        # We assume up to 10 writers to be safe
+        # --- WRITERS (Extract Shares) ---
         writers_found = []
+        total_writer_pr = 0.0
+        total_writer_mr = 0.0
+        total_writer_sr = 0.0
         
         for w_idx in range(1, 10):
             w_last = get_col(row, "WRITER", w_idx, "Last Name")
-            if pd.isna(w_last): break # Stop if no more writers
+            if pd.isna(w_last): break 
             
             w_first = get_col(row, "WRITER", w_idx, "First Name")
             w_ipi = get_col(row, "WRITER", w_idx, "IPI")
-            w_share_raw = get_col(row, "WRITER", w_idx, "Collection Performance Share %")
+            
+            # Raw Shares (Float for calculation)
+            pr_raw = get_col(row, "WRITER", w_idx, "Collection Performance Share %")
+            mr_raw = get_col(row, "WRITER", w_idx, "Collection Mechanical Share %")
+            # Default to 0 if missing (Common in libraries)
+            pr_float = float(pr_raw) if pd.notna(pr_raw) else 0.0
+            mr_float = float(mr_raw) if pd.notna(mr_raw) else 0.0
+            # Sync often mirrors Mech
+            sr_float = mr_float 
+            
+            total_writer_pr += pr_float
+            total_writer_mr += mr_float
+            total_writer_sr += sr_float
+            
             w_orig_pub = get_col(row, "WRITER", w_idx, "Original Publisher")
             
-            w_share = fmt_share(w_share_raw)
-            
+            w_id = lookup_id(w_last, FIXED_WRITER_IDS)
+            if not w_id:
+                w_id = f"0000000{unknown_writer_counter}"
+                unknown_writer_counter += 1
+                
             writers_found.append({
-                "idx": w_idx,
-                "last": w_last,
-                "first": w_first,
-                "ipi": w_ipi,
-                "share": w_share,
+                "id": w_id, "last": w_last, "first": w_first,
+                "ipi": w_ipi, 
+                "pr_share_fmt": fmt_share(pr_float),
+                "mr_share_fmt": fmt_share(mr_float),
+                "sr_share_fmt": fmt_share(sr_float),
                 "orig_pub": w_orig_pub
             })
+            
+        # --- PUBLISHER BALANCE LOGIC ---
+        # Calculate what remains for the publisher (100 - Writer Total)
+        # We assume one main publisher group (or split equally if multiple).
+        # For this specific workflow, we link writers to their original pub.
         
-        # --- PUBLISHER LOOP (Derived from Writers if explicit columns missing) ---
-        # Harvest format often hides publishers inside the writer row
+        # Default remainder
+        rem_pr = max(0, 100.0 - total_writer_pr)
+        rem_mr = max(0, 100.0 - total_writer_mr)
+        rem_sr = max(0, 100.0 - total_writer_sr)
+
         unique_pubs = {}
-        for w in writers_found:
-            pub_name = w['orig_pub']
-            if pd.isna(pub_name) or str(pub_name).strip() == '': continue
-            
-            if pub_name not in unique_pubs:
-                unique_pubs[pub_name] = get_pub(pub_name)
+        pub_count = 0
         
-        # Build Publisher Records (SPU/SPT)
-        p_counter = 1
-        for p_raw_name, p_data in unique_pubs.items():
-            # Estimate share based on linked writers (simplified: 50/50 split usually)
-            # For CWR generation, we often mirror the writer share for the publisher
-            # This logic mimics your previous "3 Publishers" loop but makes it dynamic
+        # Identify Publishers
+        for w in writers_found:
+            p_name = w['orig_pub']
+            if pd.isna(p_name) or str(p_name).strip() == '': continue
+            if p_name not in unique_pubs:
+                pub_count += 1
+                unique_pubs[p_name] = {"name": p_name}
+        
+        # Assign Shares to Publishers (Split remainder equally)
+        if pub_count > 0:
+            share_per_pub_pr = rem_pr / pub_count
+            share_per_pub_mr = rem_mr / pub_count
+            share_per_pub_sr = rem_sr / pub_count
+        else:
+            share_per_pub_pr = 0
+            share_per_pub_mr = 0
+            share_per_pub_sr = 0
+
+        # Populate Publisher Data
+        for p_name in unique_pubs:
+            p_id = lookup_id(p_name, FIXED_PUB_IDS)
+            if not p_id:
+                p_id = f"0000000{unknown_pub_counter}"
+                unknown_pub_counter += 1
             
-            # SPU 1: Original
+            agr = "00000000"
+            for k, v in AGREEMENT_MAP.items():
+                if k in str(p_name).upper(): agr = v; break
+            
+            unique_pubs[p_name].update({
+                "id": p_id, "agreement": agr, "ipi": "00000000000",
+                "pr_fmt": fmt_share(share_per_pub_pr),
+                "mr_fmt": fmt_share(share_per_pub_mr),
+                "sr_fmt": fmt_share(share_per_pub_sr)
+            })
+
+        # --- BUILD RECORDS ---
+        p_chain_idx = 1
+        for p_raw, p_data in unique_pubs.items():
+            # SPU 1: Original Publisher (Ownership)
             ctx_spu = {
-                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_counter:02d}",
-                "pub_id": f"00000000{p_counter}", "pub_name": p_data['name'], "role": "E ",
-                "ipi": p_data['ipi'], "pr_soc": "021", "pr_share": "05000", # Default 50%
-                "mr_soc": "021", "mr_share": "05000", "sr_soc": "   ", "sr_share": "03300",
+                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_chain_idx:02d}",
+                "pub_id": p_data['id'], "pub_name": p_data['name'], "role": "E ",
+                "ipi": p_data['ipi'], "pr_soc": "021", 
+                "pr_share": p_data['pr_fmt'], # DYNAMIC
+                "mr_soc": "021", 
+                "mr_share": p_data['mr_fmt'], # DYNAMIC
+                "sr_soc": "   ", 
+                "sr_share": p_data['sr_fmt'], # DYNAMIC
                 "agreement": p_data['agreement']
             }
             lines.append(asm.build(Blueprints.SPU, ctx_spu))
             rec_seq += 1
             
             # SPU 2: Lumina (Administrator)
+            lum_id = FIXED_PUB_IDS["LUMINA"]
             ctx_lum = ctx_spu.copy()
             ctx_lum.update({
-                "rec_seq": f"{rec_seq:08d}", "pub_id": "000000012", "pub_name": LUMINA_CONFIG['name'],
-                "role": "SE", "ipi": LUMINA_CONFIG['ipi'], "pr_soc": "052", "pr_share": "00000",
-                "mr_soc": "033", "mr_share": "00000", "sr_soc": "033", "sr_share": "00000" 
+                "rec_seq": f"{rec_seq:08d}", "pub_id": lum_id, "pub_name": LUMINA_CONFIG['name'],
+                "role": "SE", "ipi": LUMINA_CONFIG['ipi'], "pr_soc": "052", 
+                "pr_share": "00000", "mr_share": "00000", "sr_share": "00000" 
             })
             lines.append(asm.build(Blueprints.SPU, ctx_lum))
             rec_seq += 1
             
-            # SPT
+            # SPT (Territory) - ADMINISTRATOR COLLECTION RULE
+            # PR: Matches the Original Pub's PR share (Standard Admin Deal)
+            # MR/SR: 100% (The Admin collects all mechanicals in their territory)
             ctx_spt = {
-                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "pub_id": "000000012",
-                "pr_share": "05000", "mr_share": "05000", "sr_share": "03300",
+                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "pub_id": lum_id,
+                "pr_share": p_data['pr_fmt'], 
+                "mr_share": "10000", # FORCE 100%
+                "sr_share": "10000", # FORCE 100%
                 "territory": LUMINA_CONFIG['territory']
             }
             lines.append(asm.build(Blueprints.SPT, ctx_spt))
             rec_seq += 1
             
-            # Store ID for linking
-            unique_pubs[p_raw_name]['internal_id'] = f"00000000{p_counter}"
-            unique_pubs[p_raw_name]['chain_idx'] = p_counter
-            p_counter += 1
+            unique_pubs[p_raw]['chain_idx'] = p_chain_idx
+            p_chain_idx += 1
 
-        # Build Writer Records (SWR/SWT/PWR)
         for w in writers_found:
             ctx_swr = {
-                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", 
-                "writer_id": f"00000000{w['idx']}",
-                "last_name": w['last'], 
-                "first_name": w.get('first', ''),
-                "ipi": w.get('ipi', ''), 
-                "pr_soc": "021", "pr_share": w['share'],
-                "mr_soc": "099", "mr_share": "00000", "sr_soc": "099", "sr_share": "00000"
+                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "writer_id": w['id'],
+                "last_name": w['last'], "first_name": w.get('first', ''),
+                "ipi": w.get('ipi', ''), "pr_soc": "021", "pr_share": w['pr_share_fmt'],
+                "mr_soc": "099", "mr_share": w['mr_share_fmt'], 
+                "sr_soc": "099", "sr_share": w['sr_share_fmt']
             }
             lines.append(asm.build(Blueprints.SWR, ctx_swr))
             rec_seq += 1
             
             ctx_swt = {
-                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "writer_id": f"00000000{w['idx']}",
-                "pr_share": w['share'], "mr_share": "00000", "sr_share": "00000"
+                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "writer_id": w['id'],
+                "pr_share": w['pr_share_fmt'], "mr_share": w['mr_share_fmt'], "sr_share": w['sr_share_fmt']
             }
             lines.append(asm.build(Blueprints.SWT, ctx_swt))
             rec_seq += 1
             
-            # PWR Link
-            orig_pub_name = w['orig_pub']
-            if orig_pub_name in unique_pubs:
-                p_info = unique_pubs[orig_pub_name]
+            orig_pub = w['orig_pub']
+            if orig_pub in unique_pubs:
+                p_data = unique_pubs[orig_pub]
                 ctx_pwr = {
                     "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}",
-                    "pub_id": p_info['internal_id'], 
-                    "pub_name": p_info['name'],
-                    "agreement": p_info['agreement'], 
-                    "writer_ref": f"000000{w['idx']:03d}{p_info['chain_idx']:02d}"
+                    "pub_id": p_data['id'], "pub_name": p_data['name'],
+                    "agreement": p_data['agreement'], 
+                    "writer_ref": f"000000{int(w['id']):03d}{p_data['chain_idx']:02d}"
                 }
                 lines.append(asm.build(Blueprints.PWR, ctx_pwr))
                 rec_seq += 1
