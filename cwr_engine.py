@@ -11,7 +11,6 @@ LUMINA_CONFIG = {
     "territory": "0826"
 }
 
-# Agreement Number Logic: Extracted from OPs
 AGREEMENT_MAP = {
     "PASHALINA": "4316161",
     "LUKACINO": "3845006",
@@ -21,9 +20,29 @@ AGREEMENT_MAP = {
 }
 
 # ==============================================================================
+# MODULE: THE ASSEMBLER (FIXED)
+# ==============================================================================
+class Assembler:
+    def __init__(self):
+        self.buffer = [' '] * 512
+    def build(self, blueprint, data_dict):
+        self.buffer = [' '] * 512 
+        for start, length, value_template in blueprint:
+            if value_template.startswith("{") and value_template.endswith("}"):
+                key = value_template[1:-1]
+                val = str(data_dict.get(key, ""))
+            else:
+                val = value_template
+            val = val.strip().upper()
+            val = val.ljust(length)[:length]
+            for i, char in enumerate(val):
+                if start + i < 512:
+                    self.buffer[start + i] = char
+        return "".join(self.buffer).rstrip()
+
+# ==============================================================================
 # BLUEPRINTS (Geometry)
 # ==============================================================================
-
 class Blueprints:
     HDR = [
         (0,  3,  "HDR"), (3,  11, "{sender_ipi}"), (14, 45, "{sender_name}"), 
@@ -77,28 +96,9 @@ class Blueprints:
         (22,  60, "{library}"), (82,  14, "{cd_id}"), (96,  4,  "0001"), (100, 60, "{label}")
     ]
 
-class Assembler:
-    def __init__(self):
-        self.buffer = [' '] * 512
-    def build(self, blueprint, data_dict):
-        self.buffer = [' '] * 512 
-        for start, length, value_template in blueprint:
-            if value_template.startswith("{") and value_template.endswith("}"):
-                key = value_template[1:-1]
-                val = str(data_dict.get(key, ""))
-            else:
-                val = value_template
-            val = val.strip().upper()
-            val = val.ljust(length)[:length]
-            for i, char in enumerate(val):
-                if start + i < 512:
-                    self.buffer[start + i] = char
-        return "".join(self.buffer).rstrip()
-
 # ==============================================================================
-# LOGIC UTILS
+# LOGIC ENGINE
 # ==============================================================================
-
 def pad_ipi(val):
     if not val or pd.isna(val): return "00000000000"
     clean = re.sub(r'\D', '', str(val))
@@ -115,23 +115,16 @@ def parse_duration(val):
     v = str(val).strip()
     try:
         ts = int(float(v))
-        m, s = divmod(ts, 60)
-        return f"00{m:02d}{s:02d}"
+        m, s = divmod(ts, 60); h, m = divmod(m, 60)
+        return f"{h:02d}{m:02d}{s:02d}"
     except: return "000000"
 
-def get_col(row, base, idx, suffix):
-    """Specific to Vessel format: 'WRITER:1: Last Name'"""
-    # Clean possible spaces from keys
-    target = f"{base}:{idx}: {suffix}".strip()
-    # Find matching column by partial name to handle invisible characters/quotes
+def get_vessel_col(row, base, idx, suffix):
+    target = f"{base}:{idx}: {suffix}".strip().upper()
     for col in row.index:
-        if target in col:
+        if target in str(col).upper():
             return row[col]
     return None
-
-# ==============================================================================
-# GENERATOR
-# ==============================================================================
 
 def generate_cwr_content(df):
     lines = []
@@ -149,20 +142,21 @@ def generate_cwr_content(df):
     for i, row in df.iterrows():
         t_seq = f"{i:08d}"
         
-        # 2. REV
+        # 2. REV (Vessel Specific Mapping)
         lines.append(asm.build(Blueprints.REV, {
-            "t_seq": t_seq, "title": str(row.get('TRACK: Title', 'UNKNOWN')),
-            "work_id": str(row.get('TRACK: Number', i)), 
+            "t_seq": t_seq, 
+            "title": str(row.get('TRACK: Title', 'UNKNOWN')),
+            "work_id": str(row.get('TRACK: Number', i+1)), 
             "iswc": str(row.get('CODE: ISWC', '')),
             "duration": parse_duration(row.get('TRACK: Duration', '0'))
         }))
 
         rec_seq = 1
-        pub_map = {} # Track created pubs to link writers
+        pub_map = {} 
         
-        # 3. PUBLISHERS (Up to 3)
+        # 3. PUBLISHERS (Vessel Logic)
         for p_idx in range(1, 4):
-            p_name = get_col(row, "PUBLISHER", p_idx, "Name")
+            p_name = get_vessel_col(row, "PUBLISHER", p_idx, "Name")
             if not p_name or pd.isna(p_name): continue
             
             p_name = str(p_name).strip()
@@ -170,32 +164,29 @@ def generate_cwr_content(df):
             for k, v in AGREEMENT_MAP.items():
                 if k in p_name.upper(): agr = v; break
             
-            # Shares from CSV (Scales 50% for CWR pie)
-            # Collection Performance Share % -> use for SPU ownership
-            pr_share_raw = float(get_col(row, "PUBLISHER", p_idx, "Collection Performance Share %") or 0)
-            cwr_share = pr_share_raw * 0.5
+            # Use Owner Performance Share from CSV
+            pr_share_raw = float(get_vessel_col(row, "PUBLISHER", p_idx, "Owner Performance Share %") or 0)
+            cwr_share = pr_share_raw * 0.5 # Equity Scaling
             
             # SPU: Original Publisher
-            ctx_spu = {
+            lines.append(asm.build(Blueprints.SPU, {
                 "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_idx:02d}",
                 "pub_id": f"00000000{p_idx}", "pub_name": p_name, "role": "E ",
-                "ipi": pad_ipi(get_col(row, "PUBLISHER", p_idx, "IPI")),
+                "ipi": pad_ipi(get_vessel_col(row, "PUBLISHER", p_idx, "IPI")),
                 "pr_soc": "021", "mr_soc": "021", "sr_soc": "   ",
                 "pr_share": fmt_share(cwr_share), "mr_share": fmt_share(cwr_share), 
                 "sr_share": fmt_share(cwr_share), "agreement": agr
-            }
-            lines.append(asm.build(Blueprints.SPU, ctx_spu))
+            }))
             rec_seq += 1
             
             # SPU: Lumina (Admin)
             lum_id = "000000012"
-            ctx_lum = ctx_spu.copy()
-            ctx_lum.update({
-                "rec_seq": f"{rec_seq:08d}", "pub_id": lum_id, "pub_name": LUMINA_CONFIG['name'],
-                "role": "SE", "ipi": pad_ipi(LUMINA_CONFIG['ipi']), "pr_soc": "052",
-                "pr_share": "00000", "mr_share": "00000", "sr_share": "00000"
-            })
-            lines.append(asm.build(Blueprints.SPU, ctx_lum))
+            lines.append(asm.build(Blueprints.SPU, {
+                "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_idx:02d}",
+                "pub_id": lum_id, "pub_name": LUMINA_CONFIG['name'], "role": "SE",
+                "ipi": pad_ipi(LUMINA_CONFIG['ipi']), "pr_soc": "052",
+                "pr_share": "00000", "mr_share": "00000", "sr_share": "00000", "agreement": agr
+            }))
             rec_seq += 1
             
             # SPT: Vesna 100% Rule
@@ -206,25 +197,25 @@ def generate_cwr_content(df):
             }))
             rec_seq += 1
             
-            pub_map[p_name] = {"id": f"00000000{p_idx}", "agr": agr, "chain": f"{p_idx:02d}"}
+            pub_map[p_name.upper()] = {"chain": f"{p_idx:02d}", "id": f"00000000{p_idx}", "agr": agr}
 
-        # 4. WRITERS (Up to 3)
+        # 4. WRITERS (Vessel Logic)
         for w_idx in range(1, 4):
-            w_last = get_col(row, "WRITER", w_idx, "Last Name")
+            w_last = get_vessel_col(row, "WRITER", w_idx, "Last Name")
             if not w_last or pd.isna(w_last): continue
             
-            share_raw = float(get_col(row, "WRITER", w_idx, "Collection Performance Share %") or 0)
-            cwr_w_share = share_raw * 0.5
+            # Scale share to 50% scale
+            w_pr_raw = float(get_vessel_col(row, "WRITER", w_idx, "Owner Performance Share %") or 0)
+            cwr_w_share = w_pr_raw * 0.5
             
             # SWR
-            ctx_swr = {
+            lines.append(asm.build(Blueprints.SWR, {
                 "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "writer_id": f"00000000{w_idx}",
-                "last_name": str(w_last), "first_name": str(get_col(row, "WRITER", w_idx, "First Name") or ""),
-                "ipi": pad_ipi(get_col(row, "WRITER", w_idx, "IPI")),
+                "last_name": str(w_last), "first_name": str(get_vessel_col(row, "WRITER", w_idx, "First Name") or ""),
+                "ipi": pad_ipi(get_vessel_col(row, "WRITER", w_idx, "IPI")),
                 "pr_soc": "021", "mr_soc": "099", "sr_soc": "099",
                 "pr_share": fmt_share(cwr_w_share), "mr_share": "00000", "sr_share": "00000"
-            }
-            lines.append(asm.build(Blueprints.SWR, ctx_swr))
+            }))
             rec_seq += 1
             
             # SWT
@@ -235,24 +226,27 @@ def generate_cwr_content(df):
             rec_seq += 1
             
             # PWR
-            p_orig = str(get_col(row, "WRITER", w_idx, "Original Publisher") or "").strip()
-            if p_orig in pub_map:
-                p_info = pub_map[p_orig]
+            orig_pub_name = str(get_vessel_col(row, "WRITER", w_idx, "Original Publisher") or "").strip().upper()
+            if orig_pub_name in pub_map:
+                p_info = pub_map[orig_pub_name]
                 lines.append(asm.build(Blueprints.PWR, {
                     "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "pub_id": p_info['id'], 
-                    "pub_name": p_orig, "agreement": p_info['agr'], "writer_ref": f"00000000{w_idx}{p_info['chain']}"
+                    "pub_name": orig_pub_name[:45], "agreement": p_info['agr'],
+                    "writer_ref": f"0000000{w_idx}{p_info['chain']}"
                 }))
                 rec_seq += 1
 
         # 5. ARTIFACTS
+        isrc_val = str(row.get('CODE: ISRC', ''))
+        cd_code = str(row.get('ALBUM: Code', 'RC055'))
         lines.append(asm.build(Blueprints.REC, {
-            "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "isrc": str(row.get('CODE: ISRC', '')),
-            "cd_id": str(row.get('ALBUM: Code', 'RC055')), "source": "CD", "label": "RED COLA"
+            "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "isrc": isrc_val, 
+            "cd_id": cd_code, "source": "CD", "title": "", "label": "RED COLA"
         }))
         rec_seq += 1
         lines.append(asm.build(Blueprints.ORN, {
             "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "library": "RED COLA", 
-            "cd_id": str(row.get('ALBUM: Code', 'RC055')), "label": "RED COLA"
+            "cd_id": cd_code, "label": "RED COLA"
         }))
 
     lines.append(f"TRL00001{len(df):08d}{len(lines)+1:08d}")
