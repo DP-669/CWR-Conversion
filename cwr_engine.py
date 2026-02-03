@@ -20,28 +20,41 @@ AGREEMENT_MAP = {
 }
 
 # ==============================================================================
-# MODULE: THE ASSEMBLER (FIXED)
+# MODULE: THE ASSEMBLER (GEOMETRY HARDENED)
 # ==============================================================================
 class Assembler:
     def __init__(self):
         self.buffer = [' '] * 512
+        
     def build(self, blueprint, data_dict):
+        # Clear buffer with spaces
         self.buffer = [' '] * 512 
+        
         for start, length, value_template in blueprint:
+            # 1. Resolve Value
             if value_template.startswith("{") and value_template.endswith("}"):
                 key = value_template[1:-1]
-                val = str(data_dict.get(key, ""))
+                val = data_dict.get(key, "")
             else:
                 val = value_template
-            val = val.strip().upper()
-            val = val.ljust(length)[:length]
-            for i, char in enumerate(val):
+            
+            # 2. SANITIZE: Remove 'NAN', None, or malformed strings
+            if val is None or str(val).upper() == 'NAN' or str(val).upper() == 'NONE':
+                val = ""
+            
+            # 3. FORMAT: Strict Uppercase and Left-Justify with padding
+            val = str(val).strip().upper()
+            padded_val = val.ljust(length)[:length]
+            
+            # 4. INJECT: Place into specific index range
+            for i, char in enumerate(padded_val):
                 if start + i < 512:
                     self.buffer[start + i] = char
+                    
         return "".join(self.buffer).rstrip()
 
 # ==============================================================================
-# BLUEPRINTS (Geometry)
+# BLUEPRINTS (Geometry - Aligned to ICE/Vesna Standards)
 # ==============================================================================
 class Blueprints:
     HDR = [
@@ -49,13 +62,16 @@ class Blueprints:
         (59, 5,  "01.10"), (64, 8,  "{date}"), (72, 6,  "{time}"), (78, 8,  "{date}"),        
         (85, 4,  "2.20"), (98, 8,  "BACKBEAT")       
     ]
+    
+    # REV: Positions force-anchored. ORI must land at 142.
     REV = [
         (0,   3,  "REV"), (3,   8,  "{t_seq}"), (11,  8,  "00000000"),     
         (19,  60, "{title}"), (79,  2,  "  "), (81,  14, "{work_id}"),    
-        (95,  11, "{iswc}"), (106, 8,  "00000000"), (114, 12, "            "),
+        (95,  11, "{iswc}"), (106, 8,  "00000000"), 
         (126, 3,  "UNC"), (129, 6,  "{duration}"), 
-        (135, 1,  "Y"), (136, 6,  "      "), (142, 3,  "ORI")           
+        (135, 1,  "Y"), (142, 3,  "ORI")           
     ]
+
     SPU = [
         (0,   3,  "SPU"), (3,   8,  "{t_seq}"), (11,  8,  "{rec_seq}"),
         (19,  2,  "{chain_id}"), (21,  9,  "{pub_id}"), (30,  45, "{pub_name}"),
@@ -64,11 +80,14 @@ class Blueprints:
         (128, 3,  "{sr_soc}"), (131, 5,  "{sr_share}"), (137, 1,  "N"),            
         (166, 14, "{agreement}"), (180, 2,  "PG")            
     ]
+
     SPT = [
         (0,   3,  "SPT"), (3,   8,  "{t_seq}"), (11,  8,  "{rec_seq}"),
         (19,  9,  "{pub_id}"), (34,  5,  "{pr_share}"), (39,  5,  "{mr_share}"),
         (44,  5,  "{sr_share}"), (49,  1,  "I"), (50,  4,  "{territory}"), (55,  3,  "001")           
     ]
+
+    # SWR: Anchored IPI at 115. Forces Last Name(45) and First Name(30) padding.
     SWR = [
         (0,   3,  "SWR"), (3,   8,  "{t_seq}"), (11,  8,  "{rec_seq}"),
         (19,  9,  "{writer_id}"), (28,  45, "{last_name}"), (73,  30, "{first_name}"),
@@ -76,21 +95,25 @@ class Blueprints:
         (129, 5,  "{pr_share}"), (134, 3,  "{mr_soc}"), (137, 5,  "{mr_share}"),
         (142, 3,  "{sr_soc}"), (145, 5,  "{sr_share}"), (151, 1,  "N")             
     ]
+
     SWT = [
         (0,   3,  "SWT"), (3,   8,  "{t_seq}"), (11,  8,  "{rec_seq}"),
         (19,  9,  "{writer_id}"), (28,  5,  "{pr_share}"), (33,  5,  "{mr_share}"),
         (38,  5,  "{sr_share}"), (43,  1,  "I"), (44,  4,  "2136"), (49,  3,  "001")
     ]
+
     PWR = [
         (0,   3,  "PWR"), (3,   8,  "{t_seq}"), (11,  8,  "{rec_seq}"),
         (19,  9,  "{pub_id}"), (28,  45, "{pub_name}"), (87,  14, "{agreement}"),
         (101, 11, "{writer_ref}")  
     ]
+
     REC = [
         (0,   3,  "REC"), (3,   8,  "{t_seq}"), (11,  8,  "{rec_seq}"), (19,  8,  "00000000"),     
         (74,  6,  "000000"), (154, 14, "{cd_id}"), (180, 12, "{isrc}"),
         (194, 2,  "{source}"), (197, 60, "{title}"), (297, 60, "{label}"), (349, 1,  "Y")
     ]
+
     ORN = [
         (0,   3,  "ORN"), (3,   8,  "{t_seq}"), (11,  8,  "{rec_seq}"), (19,  3,  "LIB"),
         (22,  60, "{library}"), (82,  14, "{cd_id}"), (96,  4,  "0001"), (100, 60, "{label}")
@@ -100,18 +123,18 @@ class Blueprints:
 # LOGIC ENGINE
 # ==============================================================================
 def pad_ipi(val):
-    if not val or pd.isna(val): return "00000000000"
+    if not val or pd.isna(val) or str(val).upper() == 'NAN': return "00000000000"
     clean = re.sub(r'\D', '', str(val))
     return clean.zfill(11)
 
 def fmt_share(val):
     try:
-        if pd.isna(val) or str(val).strip() == '': return "00000"
+        if pd.isna(val) or str(val).strip() == '' or str(val).upper() == 'NAN': return "00000"
         return f"{int(round(float(val) * 100)):05d}"
     except: return "00000"
 
 def parse_duration(val):
-    if pd.isna(val) or not str(val).strip(): return "000000"
+    if pd.isna(val) or not str(val).strip() or str(val).upper() == 'NAN': return "000000"
     v = str(val).strip()
     try:
         ts = int(float(v))
@@ -154,10 +177,10 @@ def generate_cwr_content(df):
         rec_seq = 1
         pub_map = {} 
         
-        # 3. PUBLISHERS (Vessel Logic)
+        # 3. PUBLISHERS
         for p_idx in range(1, 4):
             p_name = get_vessel_col(row, "PUBLISHER", p_idx, "Name")
-            if not p_name or pd.isna(p_name): continue
+            if not p_name or pd.isna(p_name) or str(p_name).upper() == 'NAN': continue
             
             p_name = str(p_name).strip()
             agr = "00000000"
@@ -165,8 +188,9 @@ def generate_cwr_content(df):
                 if k in p_name.upper(): agr = v; break
             
             # Use Owner Performance Share from CSV
-            pr_share_raw = float(get_vessel_col(row, "PUBLISHER", p_idx, "Owner Performance Share %") or 0)
-            cwr_share = pr_share_raw * 0.5 # Equity Scaling
+            pr_raw = get_vessel_col(row, "PUBLISHER", p_idx, "Owner Performance Share %")
+            pr_share_val = float(pr_raw) if pd.notna(pr_raw) else 0.0
+            cwr_share = pr_share_val * 0.5 # Equity Scaling
             
             # SPU: Original Publisher
             lines.append(asm.build(Blueprints.SPU, {
@@ -189,7 +213,7 @@ def generate_cwr_content(df):
             }))
             rec_seq += 1
             
-            # SPT: Vesna 100% Rule
+            # SPT: Vesna 50/100/100 Rule
             lines.append(asm.build(Blueprints.SPT, {
                 "t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "pub_id": lum_id,
                 "pr_share": fmt_share(cwr_share), "mr_share": "10000", "sr_share": "10000",
@@ -199,14 +223,14 @@ def generate_cwr_content(df):
             
             pub_map[p_name.upper()] = {"chain": f"{p_idx:02d}", "id": f"00000000{p_idx}", "agr": agr}
 
-        # 4. WRITERS (Vessel Logic)
+        # 4. WRITERS
         for w_idx in range(1, 4):
             w_last = get_vessel_col(row, "WRITER", w_idx, "Last Name")
-            if not w_last or pd.isna(w_last): continue
+            if not w_last or pd.isna(w_last) or str(w_last).upper() == 'NAN': continue
             
-            # Scale share to 50% scale
-            w_pr_raw = float(get_vessel_col(row, "WRITER", w_idx, "Owner Performance Share %") or 0)
-            cwr_w_share = w_pr_raw * 0.5
+            w_pr_raw = get_vessel_col(row, "WRITER", w_idx, "Owner Performance Share %")
+            w_pr_val = float(w_pr_raw) if pd.notna(w_pr_raw) else 0.0
+            cwr_w_share = w_pr_val * 0.5
             
             # SWR
             lines.append(asm.build(Blueprints.SWR, {
