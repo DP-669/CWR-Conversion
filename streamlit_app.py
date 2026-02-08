@@ -13,7 +13,7 @@ except ImportError as e:
 
 st.set_page_config(page_title="Lumina CWR Suite", page_icon="🎵", layout="wide")
 
-st.title("Lumina CWR Suite")
+st.title("Lumina CWR Suite (ICE/PRS)")
 st.markdown("---")
 
 tab1, tab2 = st.tabs(["🚀 Generator", "🛡️ Validator"])
@@ -22,7 +22,14 @@ tab1, tab2 = st.tabs(["🚀 Generator", "🛡️ Validator"])
 # TAB 1: GENERATOR
 # ==============================================================================
 with tab1:
-    st.header("Generate CWR v2.1")
+    st.header("Generate CWR v2.2")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        seq_num = st.number_input("Sequence Number (0001, 0002...)", min_value=1, max_value=9999, value=1, format="%d")
+    with col2:
+        st.info(f"Next File: CW{datetime.now().strftime('%y')}{seq_num:04d}LUM_319.V22")
+
     uploaded_file = st.file_uploader("Upload Metadata CSV", type="csv", key="gen_upload")
 
     if uploaded_file:
@@ -41,29 +48,34 @@ with tab1:
             
             st.success(f"File loaded. Header detected at Row {header_row_index + 1}.")
             
-            if st.button("Generate CWR", key="gen_btn"):
+            if st.button("Generate CWR File", key="gen_btn"):
                 cwr_output = generate_cwr_content(df)
-                filename = f"LUMINA_ICE_{datetime.now().strftime('%Y%m%d')}.V21"
+                
+                # Naming Convention: CW + Year(2) + Seq(4) + Sender(3) + _ + Recipient(3) + .V22
+                yy = datetime.now().strftime('%y')
+                seq_str = f"{seq_num:04d}"
+                filename = f"CW{yy}{seq_str}LUM_319.V22"
                 
                 st.download_button(
-                    label="📥 Download .V21",
+                    label=f"📥 Download {filename}",
                     data=cwr_output,
                     file_name=filename,
                     mime="text/plain"
                 )
-                st.success("Generated! Go to the Validator tab to check it.")
+                st.success(f"Generated {filename}! Switch to the Validator tab to verify it.")
                 
         except Exception as e:
             st.error(f"Generation Failed: {str(e)}")
 
 # ==============================================================================
-# TAB 2: VALIDATOR (Simplified: Download Only)
+# TAB 2: VALIDATOR
 # ==============================================================================
 with tab2:
     st.header("Validate CWR")
-    val_file = st.file_uploader("Upload .V21 or .TXT", type=["v21", "txt"], key="val_upload")
+    val_file = st.file_uploader("Upload .V21, .V22 or .TXT", type=["v21", "v22", "txt"], key="val_upload")
     
     if val_file:
+        # Decode file safely
         stringio = io.StringIO(val_file.getvalue().decode("latin-1"))
         file_content = stringio.read()
         
@@ -72,25 +84,26 @@ with tab2:
             report, stats = validator.process_file(file_content)
             
             # --- DASHBOARD ---
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Lines Read", stats["lines_read"])
-            col2.metric("Works Found", stats["transactions"])
-            col3.metric("Errors Found", len(report))
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Lines Read", stats["lines_read"])
+            c2.metric("Works Found", stats["transactions"])
+            c3.metric("Issues Found", len(report))
             
             if len(report) == 0:
-                st.success("✅ PASSED. File is clean.")
+                st.success("✅ PASSED. File is clean and ready for submission.")
             else:
                 st.error(f"❌ FAILED. Found {len(report)} issues.")
                 
-                # Create a formatted text report for analysis
+                # Formatted Report
                 report_lines = []
                 report_lines.append(f"DIAGNOSTIC REPORT - {datetime.now()}")
-                report_lines.append(f"Total Errors: {len(report)}")
+                report_lines.append(f"Total Issues: {len(report)}")
                 report_lines.append("-" * 60)
                 
                 for item in report:
                     report_lines.append(f"LINE {item['line']} [{item['level']}]: {item['message']}")
-                    report_lines.append(f"CONTENT: {item['content']}")
+                    if item['content']:
+                        report_lines.append(f"CONTENT: {item['content']}")
                     report_lines.append("-" * 20)
                 
                 report_text = "\n".join(report_lines)
@@ -101,4 +114,6 @@ with tab2:
                     file_name="validation_errors.txt",
                     mime="text/plain"
                 )
-                st.info("Download this report and paste it into the chat for analysis.")
+                
+                with st.expander("View Details On-Screen"):
+                    st.text(report_text)
