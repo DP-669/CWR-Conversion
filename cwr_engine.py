@@ -40,18 +40,21 @@ class Assembler:
         return "".join(self.buffer).rstrip()
 
 class Blueprints:
+    # FIXED: Sender Name shifted to 14 to eliminate double space after 9-digit IPI
     HDR = [
         (0, 3, "HDR"), (3, 2, "01"), (5, 9, "{sender_ipi_short}"), 
-        (16, 45, "{sender_name}"), (61, 5, "01.10"), (66, 8, "{date}"), 
+        (14, 45, "{sender_name}"), (61, 5, "01.10"), (66, 8, "{date}"), 
         (74, 6, "{time}"), (80, 8, "{date}"), (103, 3, "2.2"), (106, 2, "00")
     ]
     GRH = [(0, 3, "GRH"), (3, 3, "NWR"), (6, 5, "00001"), (11, 5, "02.10"), (16, 10, "0000000000")]
-    REV = [
-        (0, 3, "REV"), (3, 8, "{t_seq}"), (11, 8, "00000000"), (19, 60, "{title}"), 
+    
+    # FIXED: Changed from REV to NWR to match Group Header
+    NWR = [
+        (0, 3, "NWR"), (3, 8, "{t_seq}"), (11, 8, "00000000"), (19, 60, "{title}"), 
         (79, 2, "  "), (81, 14, "{work_id}"), (95, 11, "{iswc}"), (106, 8, "00000000"), 
         (126, 3, "UNC"), (129, 6, "{duration}"), (135, 1, "Y"), (136, 6, "      "), (142, 3, "ORI")
     ]
-    # FIXED: Removed agreement from pos 98. Shifted 'N' to 137. Added Padding at 181.
+    
     SPU = [
         (0, 3, "SPU"), (3, 8, "{t_seq}"), (11, 8, "{rec_seq}"), (19, 2, "{chain_id}"), 
         (21, 9, "{pub_id}"), (30, 45, "{pub_name}"), (76, 2, "{role}"), (87, 11, "{ipi}"), 
@@ -65,7 +68,6 @@ class Blueprints:
         (34, 5, "{pr_share}"), (39, 5, "{mr_share}"), (44, 5, "{sr_share}"), 
         (49, 1, "I"), (50, 4, "{territory}"), (55, 3, "001")
     ]
-    # FIXED: Shifted 'N' to 151 to allow space.
     SWR = [
         (0, 3, "SWR"), (3, 8, "{t_seq}"), (11, 8, "{rec_seq}"), (19, 9, "{writer_id}"), 
         (28, 45, "{last_name}"), (73, 30, "{first_name}"), (104, 2, "C "), 
@@ -125,7 +127,6 @@ def get_vessel_col(row, base, idx, suffix):
 def generate_cwr_content(df):
     lines = []; asm = Assembler(); now = datetime.now()
     
-    # FIXED: Use sliced IPI (last 9 digits) for HDR to avoid "0101..." issue
     full_ipi = pad_ipi(LUMINA_CONFIG["ipi"])
     hdr_ipi = full_ipi[-9:] 
     
@@ -140,7 +141,8 @@ def generate_cwr_content(df):
     for i, row in df.iterrows():
         t_count += 1; t_seq = f"{(t_count-1):08d}"; rec_seq = 1; pub_map = {}
         title_val = str(row.get('TRACK: Title', 'UNKNOWN'))
-        lines.append(asm.build(Blueprints.REV, {"t_seq": t_seq, "title": title_val, "work_id": str(row.get('TRACK: Number', i+1)), "iswc": str(row.get('CODE: ISWC', '')), "duration": parse_duration(row.get('TRACK: Duration', '0'))}))
+        # FIXED: Switched from REV to NWR blueprint
+        lines.append(asm.build(Blueprints.NWR, {"t_seq": t_seq, "title": title_val, "work_id": str(row.get('TRACK: Number', i+1)), "iswc": str(row.get('CODE: ISWC', '')), "duration": parse_duration(row.get('TRACK: Duration', '0'))}))
         rec_sum_in_t = 1
         for p_idx in range(1, 4):
             p_name = get_vessel_col(row, "PUBLISHER", p_idx, "Name")
@@ -152,7 +154,6 @@ def generate_cwr_content(df):
             
             cwr_share = float(pr_raw) if pd.notna(pr_raw) else 0.0
             
-            # FIXED: Hardcoded MR/SR shares to 10000 (100%) for Publisher SPU
             lines.append(asm.build(Blueprints.SPU, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_idx:02d}", "pub_id": f"00000000{p_idx}", "pub_name": p_name, "role": "E ", "ipi": pad_ipi(get_vessel_col(row, "PUBLISHER", p_idx, "IPI")), "pr_soc": "021", "mr_soc": "021", "sr_soc": "   ", "pr_share": fmt_share(cwr_share), "mr_share": "10000", "sr_share": "10000", "agreement": agr}))
             rec_seq += 1; rec_sum_in_t += 1
             lum_id = "000000012"
