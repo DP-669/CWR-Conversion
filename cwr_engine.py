@@ -41,7 +41,7 @@ class Assembler:
 
 class Blueprints:
     HDR = [
-        (0, 3, "HDR"), (3, 2, "01"), (5, 11, "{sender_ipi}"), 
+        (0, 3, "HDR"), (3, 2, "01"), (5, 9, "{sender_ipi_short}"), 
         (16, 45, "{sender_name}"), (61, 5, "01.10"), (66, 8, "{date}"), 
         (74, 6, "{time}"), (80, 8, "{date}"), (103, 3, "2.2"), (106, 2, "00")
     ]
@@ -51,24 +51,27 @@ class Blueprints:
         (79, 2, "  "), (81, 14, "{work_id}"), (95, 11, "{iswc}"), (106, 8, "00000000"), 
         (126, 3, "UNC"), (129, 6, "{duration}"), (135, 1, "Y"), (136, 6, "      "), (142, 3, "ORI")
     ]
+    # FIXED: Removed agreement from pos 98. Shifted 'N' to 137. Added Padding at 181.
     SPU = [
         (0, 3, "SPU"), (3, 8, "{t_seq}"), (11, 8, "{rec_seq}"), (19, 2, "{chain_id}"), 
         (21, 9, "{pub_id}"), (30, 45, "{pub_name}"), (76, 2, "{role}"), (87, 11, "{ipi}"), 
-        (98, 14, "{agreement}"), (112, 3, "{pr_soc}"), (115, 5, "{pr_share}"), 
+        (112, 3, "{pr_soc}"), (115, 5, "{pr_share}"), 
         (120, 3, "{mr_soc}"), (123, 5, "{mr_share}"), (128, 3, "{sr_soc}"), 
-        (131, 5, "{sr_share}"), (136, 1, "N"), (165, 14, "{agreement}"), (179, 2, "PG")
+        (131, 5, "{sr_share}"), (137, 1, "N"), (165, 14, "{agreement}"), (179, 2, "PG"),
+        (181, 3, "   ")
     ]
     SPT = [
         (0, 3, "SPT"), (3, 8, "{t_seq}"), (11, 8, "{rec_seq}"), (19, 9, "{pub_id}"), 
         (34, 5, "{pr_share}"), (39, 5, "{mr_share}"), (44, 5, "{sr_share}"), 
         (49, 1, "I"), (50, 4, "{territory}"), (55, 3, "001")
     ]
+    # FIXED: Shifted 'N' to 151 to allow space.
     SWR = [
         (0, 3, "SWR"), (3, 8, "{t_seq}"), (11, 8, "{rec_seq}"), (19, 9, "{writer_id}"), 
         (28, 45, "{last_name}"), (73, 30, "{first_name}"), (104, 2, "C "), 
         (115, 11, "{ipi}"), (126, 3, "{pr_soc}"), (129, 5, "{pr_share}"), 
         (134, 3, "{mr_soc}"), (137, 5, "{mr_share}"), (142, 3, "{sr_soc}"), 
-        (145, 5, "{sr_share}"), (150, 1, "N")
+        (145, 5, "{sr_share}"), (151, 1, "N")
     ]
     SWT = [
         (0, 3, "SWT"), (3, 8, "{t_seq}"), (11, 8, "{rec_seq}"), (19, 9, "{writer_id}"), 
@@ -121,7 +124,17 @@ def get_vessel_col(row, base, idx, suffix):
 
 def generate_cwr_content(df):
     lines = []; asm = Assembler(); now = datetime.now()
-    lines.append(asm.build(Blueprints.HDR, {"sender_ipi": pad_ipi(LUMINA_CONFIG["ipi"]), "sender_name": LUMINA_CONFIG["name"], "date": now.strftime("%Y%m%d"), "time": now.strftime("%H%M%S")}))
+    
+    # FIXED: Use sliced IPI (last 9 digits) for HDR to avoid "0101..." issue
+    full_ipi = pad_ipi(LUMINA_CONFIG["ipi"])
+    hdr_ipi = full_ipi[-9:] 
+    
+    lines.append(asm.build(Blueprints.HDR, {
+        "sender_ipi_short": hdr_ipi, 
+        "sender_name": LUMINA_CONFIG["name"], 
+        "date": now.strftime("%Y%m%d"), 
+        "time": now.strftime("%H%M%S")
+    }))
     lines.append(asm.build(Blueprints.GRH, {}))
     t_count = 0; r_sum = 2 
     for i, row in df.iterrows():
@@ -137,10 +150,10 @@ def generate_cwr_content(df):
                 if k in p_name.upper(): agr = v; break
             pr_raw = get_vessel_col(row, "PUBLISHER", p_idx, "Owner Performance Share %")
             
-            # FIXED: REMOVED * 0.5 MULTIPLIER
             cwr_share = float(pr_raw) if pd.notna(pr_raw) else 0.0
             
-            lines.append(asm.build(Blueprints.SPU, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_idx:02d}", "pub_id": f"00000000{p_idx}", "pub_name": p_name, "role": "E ", "ipi": pad_ipi(get_vessel_col(row, "PUBLISHER", p_idx, "IPI")), "pr_soc": "021", "mr_soc": "021", "sr_soc": "   ", "pr_share": fmt_share(cwr_share), "mr_share": fmt_share(cwr_share), "sr_share": fmt_share(cwr_share), "agreement": agr}))
+            # FIXED: Hardcoded MR/SR shares to 10000 (100%) for Publisher SPU
+            lines.append(asm.build(Blueprints.SPU, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_idx:02d}", "pub_id": f"00000000{p_idx}", "pub_name": p_name, "role": "E ", "ipi": pad_ipi(get_vessel_col(row, "PUBLISHER", p_idx, "IPI")), "pr_soc": "021", "mr_soc": "021", "sr_soc": "   ", "pr_share": fmt_share(cwr_share), "mr_share": "10000", "sr_share": "10000", "agreement": agr}))
             rec_seq += 1; rec_sum_in_t += 1
             lum_id = "000000012"
             lines.append(asm.build(Blueprints.SPU, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_idx:02d}", "pub_id": lum_id, "pub_name": LUMINA_CONFIG['name'], "role": "SE", "ipi": pad_ipi(LUMINA_CONFIG['ipi']), "pr_soc": "052", "mr_soc": "033", "sr_soc": "033", "pr_share": "00000", "mr_share": "00000", "sr_share": "00000", "agreement": agr}))
@@ -153,7 +166,6 @@ def generate_cwr_content(df):
             if not w_last or pd.isna(w_last) or str(w_last).upper() == 'NAN': continue
             w_pr_raw = get_vessel_col(row, "WRITER", w_idx, "Owner Performance Share %")
             
-            # FIXED: REMOVED * 0.5 MULTIPLIER
             c_w_share = float(w_pr_raw) if pd.notna(w_pr_raw) else 0.0
             
             lines.append(asm.build(Blueprints.SWR, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "writer_id": f"00000000{w_idx}", "last_name": str(w_last), "first_name": str(get_vessel_col(row, "WRITER", w_idx, "First Name") or ""), "ipi": pad_ipi(get_vessel_col(row, "WRITER", w_idx, "IPI")), "pr_soc": "021", "mr_soc": "099", "sr_soc": "099", "pr_share": fmt_share(c_w_share), "mr_share": "00000", "sr_share": "00000"})); rec_seq += 1; rec_sum_in_t += 1
