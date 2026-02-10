@@ -53,11 +53,9 @@ class Blueprints:
     TRL = [(0,3,"TRL"),(3,5,"00001"),(8,8,"{t_count}"),(16,8,"{r_count}")]
 
 def pad_ipi(v): return re.sub(r'\D','',str(v)).zfill(11) if v and str(v).upper()!='NAN' else "00000000000"
-
 def fmt_share(v): 
     try: return f"{int(round(float(v)*100)):05d}"
     except: return "00000"
-
 def parse_duration(v):
     try:
         v = str(v).strip()
@@ -65,14 +63,12 @@ def parse_duration(v):
         else: ts=int(float(v)); m,s=divmod(ts,60); h,m=divmod(m,60)
         return f"{h:02d}{m:02d}{s:02d}"
     except: return "000000"
-
 def find_col(row, candidates):
     for c in candidates:
         uc = c.upper()
         for idx in row.index:
             if uc in str(idx).upper(): return row[idx]
     return None
-
 def get_vessel_col(row, base, idx, suffix):
     t1 = f"{base}:{idx}: {suffix}".upper()
     sa_suffix = suffix
@@ -90,21 +86,18 @@ def generate_cwr_content(df):
     lines = []; asm = Assembler(); now = datetime.now()
     full_ipi = pad_ipi(LUMINA_CONFIG["ipi"])
     
-    # 1. HEADER (Line 1)
+    # Header
     lines.append(asm.build(Blueprints.HDR, {"sender_ipi_short": full_ipi[-9:], "sender_name": LUMINA_CONFIG["name"], "date": now.strftime("%Y%m%d"), "time": now.strftime("%H%M%S")}))
-    
-    # 2. GROUP HEADER (Line 2)
+    # Group Header
     lines.append(asm.build(Blueprints.GRH, {}))
     
     t_count = 0
     for i, row in df.iterrows():
         t_count += 1; t_seq = f"{(t_count-1):08d}"; rec_seq = 1; pub_map = {}
-        
         title_val = str(find_col(row, ['TRACK: Title', 'Title', 'Track Title']) or 'UNKNOWN')
         work_id = str(find_col(row, ['TRACK: Number', 'Track Number']) or (i+1))
         iswc = str(find_col(row, ['CODE: ISWC', 'ISWC']) or '')
         dur_raw = find_col(row, ['TRACK: Duration', 'Length', 'Duration']) or '0'
-        
         lines.append(asm.build(Blueprints.NWR, {"t_seq": t_seq, "title": title_val, "work_id": work_id, "iswc": iswc, "duration": parse_duration(dur_raw)}))
         
         for p_idx in range(1, 4):
@@ -113,11 +106,9 @@ def generate_cwr_content(df):
             p_name = str(p_name).strip(); agr = "00000000"
             for k, v in AGREEMENT_MAP.items():
                 if k in p_name.upper(): agr = v; break
-            
             pr_share = fmt_share(get_vessel_col(row, "PUBLISHER", p_idx, "Owner Performance Share %"))
             lines.append(asm.build(Blueprints.SPU, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_idx:02d}", "pub_id": f"00000000{p_idx}", "pub_name": p_name, "role": "E ", "ipi": pad_ipi(get_vessel_col(row, "PUBLISHER", p_idx, "IPI")), "pr_soc": "021", "mr_soc": "021", "sr_soc": "   ", "pr_share": pr_share, "mr_share": "10000", "sr_share": "10000", "agreement": agr}))
             rec_seq += 1
-            
             lum_id = "000000012"
             lines.append(asm.build(Blueprints.SPU, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "chain_id": f"{p_idx:02d}", "pub_id": lum_id, "pub_name": LUMINA_CONFIG['name'], "role": "SE", "ipi": full_ipi, "pr_soc": "052", "mr_soc": "033", "sr_soc": "033", "pr_share": "00000", "mr_share": "00000", "sr_share": "00000", "agreement": agr}))
             rec_seq += 1
@@ -141,16 +132,14 @@ def generate_cwr_content(df):
         lines.append(asm.build(Blueprints.REC, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "isrc": isrc, "cd_id": cd, "source": "CD", "title": "", "label": "RED COLA", "duration": parse_duration(dur_raw)})); rec_seq += 1
         lines.append(asm.build(Blueprints.ORN, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "library": "RED COLA", "cd_id": cd, "label": "RED COLA"})); rec_seq += 1
 
-    # 3. GROUP TRAILER (GRT)
-    # Count = Total lines so far MINUS 1 (Exclude HDR) PLUS 1 (Include GRT itself)
-    # Effectively: len(lines)
+    # DYNAMIC COUNTING - SYSTEMATIC FIX
+    # GRT Count = All lines added so far - 1 (HDR) + 1 (GRT itself)
     grp_count = len(lines)
     lines.append(asm.build(Blueprints.GRT, {"t_count": f"{t_count:08d}", "r_count": f"{grp_count:08d}"}))
     
-    # 4. FILE TRAILER (TRL)
-    # Count = Total lines so far (Includes HDR + Group + GRT) PLUS 1 (Include TRL itself)
+    # TRL Count = All lines added so far + 1 (TRL itself)
     total_count = len(lines) + 1
     lines.append(asm.build(Blueprints.TRL, {"t_count": f"{t_count:08d}", "r_count": f"{total_count:08d}"}))
     
-    # SYSTEMATIC FIX: Add Final Newline and use CRLF
+    # ENFORCE CRLF AND FINAL NEWLINE
     return "\r\n".join(lines) + "\r\n"
