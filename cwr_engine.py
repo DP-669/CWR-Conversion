@@ -66,7 +66,6 @@ def parse_duration(v):
         return f"{h:02d}{m:02d}{s:02d}"
     except: return "000000"
 
-# SMART COLUMN FINDER: Handles Harvest vs SourceAudio Schema
 def find_col(row, candidates):
     for c in candidates:
         uc = c.upper()
@@ -75,19 +74,12 @@ def find_col(row, candidates):
     return None
 
 def get_vessel_col(row, base, idx, suffix):
-    # Strategy 1: Harvest Media Format (Colon Separated)
-    # e.g. "PUBLISHER:1: Name"
     t1 = f"{base}:{idx}: {suffix}".upper()
-    
-    # Strategy 2: SourceAudio Format (Space Separated)
-    # e.g. "Publisher 1 Company" instead of "Name"
     sa_suffix = suffix
     if base == "PUBLISHER" and suffix == "Name": sa_suffix = "Company"
     if suffix == "Owner Performance Share %": sa_suffix = "Ownership Share"
     if suffix == "IPI": sa_suffix = "CAE/IPI"
-    
     t2 = f"{base} {idx} {sa_suffix}".upper()
-    
     for c in row.index:
         sc = str(c).upper()
         if t1 in sc: return row[c]
@@ -98,14 +90,16 @@ def generate_cwr_content(df):
     lines = []; asm = Assembler(); now = datetime.now()
     full_ipi = pad_ipi(LUMINA_CONFIG["ipi"])
     
+    # 1. HEADER (Line 1)
     lines.append(asm.build(Blueprints.HDR, {"sender_ipi_short": full_ipi[-9:], "sender_name": LUMINA_CONFIG["name"], "date": now.strftime("%Y%m%d"), "time": now.strftime("%H%M%S")}))
+    
+    # 2. GROUP HEADER (Line 2)
     lines.append(asm.build(Blueprints.GRH, {}))
     
     t_count = 0
     for i, row in df.iterrows():
         t_count += 1; t_seq = f"{(t_count-1):08d}"; rec_seq = 1; pub_map = {}
         
-        # UNIVERSAL FIELDS
         title_val = str(find_col(row, ['TRACK: Title', 'Title', 'Track Title']) or 'UNKNOWN')
         work_id = str(find_col(row, ['TRACK: Number', 'Track Number']) or (i+1))
         iswc = str(find_col(row, ['CODE: ISWC', 'ISWC']) or '')
@@ -147,9 +141,16 @@ def generate_cwr_content(df):
         lines.append(asm.build(Blueprints.REC, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "isrc": isrc, "cd_id": cd, "source": "CD", "title": "", "label": "RED COLA", "duration": parse_duration(dur_raw)})); rec_seq += 1
         lines.append(asm.build(Blueprints.ORN, {"t_seq": t_seq, "rec_seq": f"{rec_seq:08d}", "library": "RED COLA", "cd_id": cd, "label": "RED COLA"})); rec_seq += 1
 
-    group_lines_count = len(lines)
-    lines.append(asm.build(Blueprints.GRT, {"t_count": f"{t_count:08d}", "r_count": f"{group_lines_count:08d}"}))
-    total_physical_lines = len(lines) + 1
-    lines.append(asm.build(Blueprints.TRL, {"t_count": f"{t_count:08d}", "r_count": f"{total_physical_lines:08d}"}))
+    # 3. GROUP TRAILER (GRT)
+    # Count = Total lines so far MINUS 1 (Exclude HDR) PLUS 1 (Include GRT itself)
+    # Effectively: len(lines)
+    grp_count = len(lines)
+    lines.append(asm.build(Blueprints.GRT, {"t_count": f"{t_count:08d}", "r_count": f"{grp_count:08d}"}))
     
-    return "\n".join(lines)
+    # 4. FILE TRAILER (TRL)
+    # Count = Total lines so far (Includes HDR + Group + GRT) PLUS 1 (Include TRL itself)
+    total_count = len(lines) + 1
+    lines.append(asm.build(Blueprints.TRL, {"t_count": f"{t_count:08d}", "r_count": f"{total_count:08d}"}))
+    
+    # SYSTEMATIC FIX: Add Final Newline and use CRLF
+    return "\r\n".join(lines) + "\r\n"
